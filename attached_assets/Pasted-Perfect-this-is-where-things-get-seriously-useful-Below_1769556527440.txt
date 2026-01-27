@@ -1,0 +1,273 @@
+Perfect — this is where things get *seriously* useful 👍
+Below is a **Huawei MA5801 “SAFE COMMAND TEMPLATE”** you can **directly embed into your app**, with **guardrails** so your automation doesn’t nuke production.
+
+These are **battle-tested, conservative templates** (read → validate → act → verify).
+
+---
+
+# 🛡️ HUAWEI MA5801 SAFE COMMAND TEMPLATES
+
+## 0️⃣ Session Safety (ALWAYS first)
+
+```bash
+enable
+scroll
+```
+
+(Optional but recommended)
+
+```bash
+screen-length 0 temporary
+```
+
+---
+
+## 1️⃣ OLT Identity & Compatibility Check
+
+**Purpose:** avoid version mismatch issues.
+
+```bash
+display version
+```
+
+App should parse:
+
+* PRODUCT
+* VERSION
+* PATCH
+
+❌ Block config if product ≠ expected (ex: MA5801)
+
+---
+
+## 2️⃣ Safe Read-Only Checks (No Risk)
+
+### A. Check GPON Port Status
+
+```bash
+display port state gpon 0/1
+```
+
+Block if port is **shutdown**.
+
+---
+
+### B. Check Unconfigured ONU
+
+```bash
+display ont autofind 0/1
+```
+
+App rule:
+
+* SN **must appear here** before binding
+
+---
+
+### C. Check Existing ONU by SN
+
+```bash
+display ont info by-sn {ONU_SN}
+```
+
+App rule:
+
+* If found → ❌ STOP (already bound)
+
+---
+
+### D. Find Free ONU ID (Safe way)
+
+```bash
+display ont info summary 0/1
+```
+
+App logic:
+
+* Collect used ONU IDs
+* Pick lowest free ID (0–127)
+
+---
+
+## 3️⃣ SAFE ONU BIND TEMPLATE (SN-auth)
+
+> **Only execute if ALL checks above pass**
+
+```bash
+interface gpon 0/1
+ont add {ONU_ID} sn-auth {ONU_SN} omci \
+  ont-lineprofile-id {LINE_PROFILE_ID} \
+  ont-srvprofile-id {SRV_PROFILE_ID} \
+  desc "{DESCRIPTION}"
+quit
+```
+
+🛑 **App Guardrails**
+
+* Block if ONU_ID already used
+* Block if profiles not found
+* Block if SN not in autofind
+
+---
+
+## 4️⃣ Post-Bind Verification (Mandatory)
+
+### A. Check ONU State
+
+```bash
+display ont info 0/1 {ONU_ID}
+```
+
+Expected:
+
+```
+Run state : online
+Config state : normal
+```
+
+---
+
+### B. Optical Power Check
+
+```bash
+display ont optical-info 0/1 {ONU_ID}
+```
+
+App rule:
+
+* RX < -30 dBm → ⚠️ warning
+* No data → likely LOS
+
+---
+
+## 5️⃣ SAFE SERVICE-PORT TEMPLATE (VLAN)
+
+> Only if not auto-created by profile
+
+```bash
+service-port vlan {VLAN_ID} gpon 0/1/{PON_PORT} \
+  ont {ONU_ID} gemport {GEMPORT_ID} \
+  multi-service user-vlan {USER_VLAN}
+```
+
+🛑 Guardrails:
+
+* VLAN must exist
+* GEMPORT must match srv-profile
+* Block duplicate service-port
+
+---
+
+## 6️⃣ Verify Service Binding
+
+```bash
+display service-port port 0/1/{PON_PORT}
+```
+
+App should match:
+
+* ONU ID
+* VLAN
+* GEMPORT
+
+---
+
+## 7️⃣ SAFE ONU DELETE (Controlled)
+
+⚠️ **Never allow without confirmation**
+
+```bash
+interface gpon 0/1
+ont delete {ONU_ID}
+quit
+```
+
+**Post-check**
+
+```bash
+display ont info by-sn {ONU_SN}
+```
+
+Expected: **Not found**
+
+---
+
+## 8️⃣ Emergency Cleanup (Admin Only)
+
+```bash
+ont delete {ONU_ID} force
+```
+
+🚨 App rule:
+
+* Admin role only
+* Double confirmation
+
+---
+
+## 9️⃣ Error Pattern Handling (App Logic)
+
+| Output contains              | App Action  |
+| ---------------------------- | ----------- |
+| `Failure: SN already exists` | STOP        |
+| `auth-fail`                  | Recheck SN  |
+| `LOS`                        | Fiber issue |
+| `profile does not exist`     | Block       |
+| `ONU ID already exists`      | Pick new ID |
+
+---
+
+## 🔐 Role-Based Command Access (Very Important)
+
+| Role        | Allowed            |
+| ----------- | ------------------ |
+| Viewer      | display*           |
+| Provisioner | ont add            |
+| Admin       | ont delete / force |
+
+---
+
+## 📦 Minimal Command Flow (MVP)
+
+```
+display version
+display ont autofind
+display ont info by-sn
+display ont info summary
+ont add
+display ont info
+display ont optical-info
+service-port
+```
+
+If your app **only supports this flow**, it is already **production-safe**.
+
+---
+
+## 🧠 Pro Tip (Automation Reality)
+
+Huawei CLI output is **not JSON**.
+Your parser must:
+
+* Be whitespace tolerant
+* Ignore localization
+* Match keywords, not positions
+
+---
+
+## 🚀 Want Next Level?
+
+I can help you with:
+
+* **Command-to-JSON parsers**
+* **Free ONU-ID selection logic**
+* **Profile-to-VLAN mapping rules**
+* **Rollback strategy if bind fails**
+
+Tell me:
+
+* Language (Node / Go / Python)
+* SSH method (paramiko, ssh2, expect)
+* Single OLT or multi-OLT
+
+We’ll turn this into a **real ISP-grade provisioning engine**, not a demo 😎
