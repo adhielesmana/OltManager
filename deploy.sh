@@ -86,18 +86,18 @@ setup_nginx() {
     else
         log_info "Installing Nginx..."
         if command -v apt-get &> /dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y nginx
+            apt-get update
+            apt-get install -y nginx
         elif command -v yum &> /dev/null; then
-            sudo yum install -y nginx
+            yum install -y nginx
         elif command -v dnf &> /dev/null; then
-            sudo dnf install -y nginx
+            dnf install -y nginx
         else
             log_error "Could not detect package manager. Please install Nginx manually."
             exit 1
         fi
-        sudo systemctl enable nginx
-        sudo systemctl start nginx
+        systemctl enable nginx
+        systemctl start nginx
         log_success "Nginx installed successfully"
     fi
 }
@@ -119,8 +119,8 @@ create_nginx_config() {
             log_info "Port configuration is up to date"
         else
             log_warn "Updating port in existing configuration..."
-            sudo sed -i "s|proxy_pass http://127.0.0.1:[0-9]*;|proxy_pass http://127.0.0.1:${port};|g" "$config_file"
-            sudo nginx -t && sudo systemctl reload nginx
+            sed -i "s|proxy_pass http://127.0.0.1:[0-9]*;|proxy_pass http://127.0.0.1:${port};|g" "$config_file"
+            nginx -t && systemctl reload nginx
             log_success "Port updated in Nginx configuration"
         fi
         return 0
@@ -129,9 +129,9 @@ create_nginx_config() {
     log_info "Creating Nginx configuration..."
     
     # Create sites-available and sites-enabled if they don't exist
-    sudo mkdir -p "$NGINX_CONF_DIR" "$NGINX_ENABLED_DIR"
+    mkdir -p "$NGINX_CONF_DIR" "$NGINX_ENABLED_DIR"
     
-    sudo tee "$config_file" > /dev/null <<EOF
+    tee "$config_file" > /dev/null <<EOF
 server {
     listen 80;
     listen [::]:80;
@@ -154,11 +154,11 @@ EOF
 
     # Enable the site
     if [ ! -L "${NGINX_ENABLED_DIR}/${APP_NAME}" ]; then
-        sudo ln -s "$config_file" "${NGINX_ENABLED_DIR}/${APP_NAME}"
+        ln -s "$config_file" "${NGINX_ENABLED_DIR}/${APP_NAME}"
     fi
     
     # Test and reload Nginx
-    sudo nginx -t && sudo systemctl reload nginx
+    nginx -t && systemctl reload nginx
     log_success "Nginx configuration created and enabled"
 }
 
@@ -186,12 +186,12 @@ setup_ssl() {
     if ! command -v certbot &> /dev/null; then
         log_info "Installing Certbot..."
         if command -v apt-get &> /dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y certbot python3-certbot-nginx
+            apt-get update
+            apt-get install -y certbot python3-certbot-nginx
         elif command -v yum &> /dev/null; then
-            sudo yum install -y certbot python3-certbot-nginx
+            yum install -y certbot python3-certbot-nginx
         elif command -v dnf &> /dev/null; then
-            sudo dnf install -y certbot python3-certbot-nginx
+            dnf install -y certbot python3-certbot-nginx
         else
             log_error "Could not install certbot. Please install it manually."
             return 1
@@ -200,7 +200,7 @@ setup_ssl() {
     
     # Obtain SSL certificate
     log_info "Obtaining SSL certificate for ${DOMAIN}..."
-    sudo certbot --nginx -d "${DOMAIN}" --non-interactive --agree-tos --email "${EMAIL}" --redirect
+    certbot --nginx -d "${DOMAIN}" --non-interactive --agree-tos --email "${EMAIL}" --redirect
     
     if [ $? -eq 0 ]; then
         log_success "SSL certificate obtained and configured"
@@ -223,7 +223,7 @@ backup_database() {
     log_info "Backing up database..."
     
     # Create backup directory
-    sudo mkdir -p "$BACKUP_DIR"
+    mkdir -p "$BACKUP_DIR"
     
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local backup_file="${BACKUP_DIR}/db_backup_${timestamp}.sql"
@@ -319,6 +319,16 @@ deploy_application() {
         docker rm "${CONTAINER_NAME}" 2>/dev/null || true
     fi
     
+    # Generate session secret if not provided
+    if [ -z "$SESSION_SECRET" ]; then
+        SESSION_SECRET=$(openssl rand -hex 32)
+        log_info "Generated new SESSION_SECRET"
+        
+        # Save to .env file for persistence across restarts
+        echo "SESSION_SECRET=${SESSION_SECRET}" >> .env.production
+        log_success "Saved SESSION_SECRET to .env.production"
+    fi
+    
     # Run the new container
     log_info "Starting new container on port ${port}..."
     docker run -d \
@@ -327,7 +337,7 @@ deploy_application() {
         -p "127.0.0.1:${port}:5000" \
         -e NODE_ENV=production \
         -e DATABASE_URL="${DATABASE_URL}" \
-        -e SESSION_SECRET="${SESSION_SECRET:-$(openssl rand -hex 32)}" \
+        -e SESSION_SECRET="${SESSION_SECRET}" \
         -v "${APP_NAME}_data:/app/data" \
         "${DOCKER_IMAGE}"
     
@@ -461,9 +471,9 @@ main() {
     echo "============================================================"
     echo ""
     
-    # Check if running as root or with sudo
-    if [ "$EUID" -ne 0 ] && ! sudo -n true 2>/dev/null; then
-        log_warn "Some operations may require sudo access"
+    # Check if running as root
+    if [ "$EUID" -ne 0 ]; then
+        log_warn "Running as non-root user. Some operations may fail."
     fi
     
     # Check Docker installation
@@ -507,8 +517,8 @@ main() {
                 echo "  --help             Show this help message"
                 echo ""
                 echo "Environment variables:"
-                echo "  DATABASE_URL       PostgreSQL connection string"
-                echo "  SESSION_SECRET     Session encryption secret"
+                echo "  DATABASE_URL       PostgreSQL connection string (required)"
+                echo "  SESSION_SECRET     Session encryption secret (auto-generated if not set)"
                 exit 0
                 ;;
             *)
@@ -521,6 +531,12 @@ main() {
     log_info "Domain: ${DOMAIN}"
     log_info "Email: ${EMAIL}"
     echo ""
+    
+    # Load saved secrets from .env.production if exists
+    if [ -f ".env.production" ]; then
+        log_info "Loading saved configuration from .env.production..."
+        source .env.production
+    fi
     
     # Step 1: Find available port
     APP_PORT=$(find_available_port)
