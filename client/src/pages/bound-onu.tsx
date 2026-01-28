@@ -23,7 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { OnuStatusBadge, ConfigStateBadge } from "@/components/onu-status-badge";
 import { UnbindOnuDialog } from "@/components/unbind-onu-dialog";
 import { OnuVerificationDialog } from "@/components/onu-verification-dialog";
-import { Search, Link2, RefreshCw, MoreHorizontal, Trash2, Signal, Eye, CheckCircle, Download, Clock } from "lucide-react";
+import { Search, Link2, RefreshCw, MoreHorizontal, Trash2, Signal, Eye, CheckCircle, Clock } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -50,27 +50,21 @@ export default function BoundOnuPage() {
     queryKey: ["/api/olt/refresh/status"],
   });
 
-  const refreshMutation = useMutation({
+  const reloadMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/olt/refresh");
+      const res = await apiRequest("POST", "/api/onu/bound/refresh");
       return res.json();
     },
     onSuccess: (data) => {
       if (data.success) {
-        toast({ title: "Sync Complete", description: data.message });
+        toast({ title: "Reload Complete", description: data.message });
         queryClient.invalidateQueries({ queryKey: ["/api/onu/bound"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/onu/unbound"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/onu/unbound/count"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/olt/refresh/status"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/profiles/line"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/profiles/service"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/vlans"] });
       } else {
-        toast({ title: "Sync Failed", description: data.message, variant: "destructive" });
+        toast({ title: "Reload Failed", description: data.message, variant: "destructive" });
       }
     },
     onError: (error: Error) => {
-      toast({ title: "Sync Error", description: error.message, variant: "destructive" });
+      toast({ title: "Reload Error", description: error.message, variant: "destructive" });
     },
   });
 
@@ -141,12 +135,12 @@ export default function BoundOnuPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => refetch()}
-            disabled={isFetching}
+            onClick={() => reloadMutation.mutate()}
+            disabled={reloadMutation.isPending}
             data-testid="button-refresh-bound"
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? "animate-spin" : ""}`} />
-            Reload
+            <RefreshCw className={`h-4 w-4 mr-2 ${reloadMutation.isPending ? "animate-spin" : ""}`} />
+            {reloadMutation.isPending ? "Reloading..." : "Reload"}
           </Button>
           <Button
             variant="outline"

@@ -329,12 +329,32 @@ export async function registerRoutes(
     }
   });
 
+  // Refresh unbound ONUs directly from OLT
+  app.post("/api/onu/unbound/refresh", requireAuth, requirePermission("onu:view"), async (req, res) => {
+    try {
+      const result = await storage.refreshUnboundOnus();
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ success: false, message: "Failed to refresh unbound ONUs" });
+    }
+  });
+
   app.get("/api/onu/bound", requireAuth, requirePermission("onu:view"), async (req, res) => {
     try {
       const onus = await storage.getBoundOnus();
       res.json(onus);
     } catch (error) {
       res.status(500).json({ error: "Failed to get bound ONUs" });
+    }
+  });
+
+  // Refresh bound ONUs directly from OLT
+  app.post("/api/onu/bound/refresh", requireAuth, requirePermission("onu:view"), async (req, res) => {
+    try {
+      const result = await storage.refreshBoundOnus();
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ success: false, message: "Failed to refresh bound ONUs" });
     }
   });
 

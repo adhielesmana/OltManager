@@ -568,6 +568,111 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  // Refresh only unbound ONUs from OLT
+  async refreshUnboundOnus(): Promise<{ success: boolean; message: string }> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential) {
+      return { success: false, message: "No active OLT credential" };
+    }
+
+    if (!huaweiSSH.isConnected()) {
+      const password = decryptOltPassword(credential.passwordEncrypted);
+      const connectResult = await huaweiSSH.connect({
+        host: credential.host,
+        port: credential.port,
+        username: credential.username,
+        password: password,
+      });
+      if (!connectResult.success) {
+        return { success: false, message: `Cannot connect to OLT: ${connectResult.message}` };
+      }
+    }
+
+    try {
+      console.log("[Storage] Refreshing unbound ONUs from OLT...");
+      const unboundList = await huaweiSSH.getUnboundOnus();
+      
+      // Clear old unbound data and insert new
+      await db.delete(unboundOnus).where(eq(unboundOnus.oltCredentialId, credential.id));
+      
+      if (unboundList.length > 0) {
+        await db.insert(unboundOnus).values(
+          unboundList.map(onu => ({
+            serialNumber: onu.serialNumber,
+            gponPort: onu.gponPort,
+            discoveredAt: new Date(onu.discoveredAt),
+            equipmentId: onu.equipmentId || null,
+            softwareVersion: onu.softwareVersion || null,
+            oltCredentialId: credential.id,
+          }))
+        );
+      }
+      
+      console.log(`[Storage] Refreshed ${unboundList.length} unbound ONUs`);
+      return { success: true, message: `Found ${unboundList.length} unbound ONUs` };
+    } catch (error: any) {
+      console.error("[Storage] Error refreshing unbound ONUs:", error);
+      return { success: false, message: `Refresh failed: ${error.message}` };
+    }
+  }
+
+  // Refresh only bound ONUs from OLT
+  async refreshBoundOnus(): Promise<{ success: boolean; message: string }> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential) {
+      return { success: false, message: "No active OLT credential" };
+    }
+
+    if (!huaweiSSH.isConnected()) {
+      const password = decryptOltPassword(credential.passwordEncrypted);
+      const connectResult = await huaweiSSH.connect({
+        host: credential.host,
+        port: credential.port,
+        username: credential.username,
+        password: password,
+      });
+      if (!connectResult.success) {
+        return { success: false, message: `Cannot connect to OLT: ${connectResult.message}` };
+      }
+    }
+
+    try {
+      console.log("[Storage] Refreshing bound ONUs from OLT...");
+      const boundList = await huaweiSSH.getBoundOnus();
+      
+      // Clear old bound data and insert new
+      await db.delete(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id));
+      
+      if (boundList.length > 0) {
+        await db.insert(boundOnus).values(
+          boundList.map(onu => ({
+            onuId: onu.onuId,
+            serialNumber: onu.serialNumber,
+            gponPort: onu.gponPort,
+            description: onu.description || "",
+            lineProfileId: onu.lineProfileId,
+            serviceProfileId: onu.serviceProfileId,
+            status: onu.status,
+            configState: onu.configState,
+            rxPower: onu.rxPower ?? null,
+            txPower: onu.txPower ?? null,
+            distance: onu.distance ?? null,
+            vlanId: onu.vlanId ?? null,
+            gemportId: onu.gemportId ?? null,
+            oltCredentialId: credential.id,
+            boundAt: new Date(onu.boundAt),
+          }))
+        );
+      }
+      
+      console.log(`[Storage] Refreshed ${boundList.length} bound ONUs`);
+      return { success: true, message: `Found ${boundList.length} bound ONUs` };
+    } catch (error: any) {
+      console.error("[Storage] Error refreshing bound ONUs:", error);
+      return { success: false, message: `Refresh failed: ${error.message}` };
+    }
+  }
+
   async getLastRefreshTime(): Promise<Date | null> {
     const credential = await this.getActiveOltCredential();
     if (!credential) return null;
