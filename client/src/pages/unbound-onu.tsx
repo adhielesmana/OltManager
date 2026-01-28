@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import type { UnboundOnu } from "@shared/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,19 +16,63 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { BindOnuDialog } from "@/components/bind-onu-dialog";
 import { OnuVerificationDialog } from "@/components/onu-verification-dialog";
-import { Search, Link2Off, Plus, RefreshCw, CheckCircle } from "lucide-react";
+import { Search, Link2Off, Plus, RefreshCw, CheckCircle, Download, Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 export default function UnboundOnuPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedOnu, setSelectedOnu] = useState<UnboundOnu | undefined>();
   const [bindDialogOpen, setBindDialogOpen] = useState(false);
   const [verifyDialogOpen, setVerifyDialogOpen] = useState(false);
+  const { toast } = useToast();
 
   const { data: unboundOnus = [], isLoading, refetch, isFetching } = useQuery<UnboundOnu[]>({
     queryKey: ["/api/onu/unbound"],
-    refetchInterval: 10000,
   });
+
+  const { data: refreshStatus } = useQuery<{ lastRefreshed: string | null; inProgress: boolean; error: string | null }>({
+    queryKey: ["/api/olt/refresh/status"],
+    refetchInterval: 5000,
+  });
+
+  const refreshMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/olt/refresh");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({ title: "Sync Complete", description: data.message });
+        queryClient.invalidateQueries({ queryKey: ["/api/onu/bound"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/onu/unbound"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/onu/unbound/count"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/olt/refresh/status"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/profiles/line"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/profiles/service"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/vlans"] });
+      } else {
+        toast({ title: "Sync Failed", description: data.message, variant: "destructive" });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Sync Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const formatLastRefresh = (dateStr: string | null) => {
+    if (!dateStr) return "Never";
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return date.toLocaleDateString();
+  };
 
   const filteredOnus = unboundOnus.filter(
     (onu) =>
@@ -54,6 +98,23 @@ export default function UnboundOnuPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground mr-2">
+            <Clock className="h-4 w-4" />
+            <span>Last sync: {formatLastRefresh(refreshStatus?.lastRefreshed || null)}</span>
+            {refreshStatus?.error && (
+              <Badge variant="destructive" className="text-xs">{refreshStatus.error}</Badge>
+            )}
+          </div>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => refreshMutation.mutate()}
+            disabled={refreshMutation.isPending || refreshStatus?.inProgress}
+            data-testid="button-sync-olt"
+          >
+            <Download className={`h-4 w-4 mr-2 ${refreshMutation.isPending || refreshStatus?.inProgress ? "animate-pulse" : ""}`} />
+            {refreshMutation.isPending || refreshStatus?.inProgress ? "Syncing..." : "Sync from OLT"}
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -62,7 +123,7 @@ export default function UnboundOnuPage() {
             data-testid="button-refresh-unbound"
           >
             <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? "animate-spin" : ""}`} />
-            Refresh
+            Reload
           </Button>
           <Button
             variant="outline"

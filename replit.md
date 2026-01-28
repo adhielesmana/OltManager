@@ -4,15 +4,41 @@
 A professional network operations management application for Huawei MA5801 OLT devices. This tool helps network operators manage GPON ONUs with safety guardrails to prevent accidental misconfigurations.
 
 ## Recent Changes (January 2026)
+- **Database storage for OLT data**: All ONU, profile, and VLAN data now stored in database
+- **Manual sync from OLT**: Added "Sync from OLT" button to fetch fresh data from device
+- **Last sync time**: Shows when data was last refreshed from OLT
 - Added user authentication and authorization system
 - Implemented role-based access control (super_admin, admin, user)
 - Added user management page for admins
 - Added OLT settings page for connection management
-- Removed mock data - shows empty states until OLT is connected
 - Protected all routes with authentication middleware
 - Fixed bound ONU parsing to handle Huawei spaced port format (0/ 1/0 → 0/1/0)
 - Improved SSH shell buffer handling for { <cr>||<K> } prompts
-- Added combined getAllOnuData() method to fetch all ONU data in single interface session
+
+## Data Storage Architecture
+
+### Database-First Approach
+OLT data (ONUs, profiles, VLANs) is stored in the PostgreSQL database instead of being fetched from the OLT device on every request. This provides:
+- **Fast UI**: Data served instantly from database
+- **Reduced OLT load**: No constant SSH queries
+- **Data persistence**: Survives server restarts
+- **Manual refresh**: User controls when to sync fresh data
+
+### Database Tables for OLT Data
+- `unbound_onus` - Discovered but unconfigured ONUs
+- `bound_onus` - Configured ONUs with status and optical info
+- `line_profiles` - Bandwidth profiles
+- `service_profiles` - Port configurations  
+- `vlans` - VLAN settings
+- `olt_data_refresh` - Tracks last refresh time and status
+
+### Sync Workflow
+1. User clicks "Sync from OLT" button
+2. App connects to OLT via SSH (if not already connected)
+3. Fetches all ONU data, profiles, and VLANs
+4. Saves to database (replaces old data for that OLT)
+5. Updates last refresh timestamp
+6. UI refreshes to show new data
 
 ## Authentication System
 

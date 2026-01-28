@@ -5,6 +5,12 @@ import {
   users,
   sessions,
   oltCredentials,
+  unboundOnus,
+  boundOnus,
+  lineProfiles,
+  serviceProfiles,
+  vlans,
+  oltDataRefresh,
   type User,
   type InsertUser,
   type Session,
@@ -19,6 +25,8 @@ import {
   type OltInfo,
   type BindOnuRequest,
   type OnuVerification,
+  type OnuStatus,
+  type OnuConfigState,
 } from "@shared/schema";
 import { 
   isSuperAdmin, 
@@ -55,7 +63,10 @@ export interface IStorage {
   deleteOltCredential(id: number): Promise<void>;
   testOltConnection(id: number): Promise<{ success: boolean; message: string }>;
   
-  // OLT data operations (from OLT device)
+  // OLT data operations (from database, refreshed from OLT on demand)
+  refreshOltData(): Promise<{ success: boolean; message: string }>;
+  getLastRefreshTime(): Promise<Date | null>;
+  getRefreshStatus(): Promise<{ lastRefreshed: Date | null; inProgress: boolean; error: string | null }>;
   getOltInfo(): Promise<OltInfo>;
   getUnboundOnus(): Promise<UnboundOnu[]>;
   getUnboundOnuCount(): Promise<number>;
@@ -71,67 +82,76 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
-  // In-memory cache for OLT data (fetched from OLT device)
-  private unboundOnus: Map<string, UnboundOnu> = new Map();
-  private boundOnus: Map<string, BoundOnu> = new Map();
-  private lineProfiles: LineProfile[] = [];
-  private serviceProfiles: ServiceProfile[] = [];
-  private vlans: Vlan[] = [];
-  private oltConnected: boolean = false;
-  private reconnectInterval: NodeJS.Timeout | null = null;
-  
   // Lock to prevent concurrent OLT data refresh operations
   private refreshLock: Promise<void> | null = null;
 
   constructor() {
-    // Auto-reconnect on startup after a short delay
-    setTimeout(() => this.autoReconnect(), 3000);
-    
-    // Setup periodic reconnection check every 30 seconds
-    this.reconnectInterval = setInterval(() => this.checkAndReconnect(), 30000);
+    // No auto-reconnect - user must explicitly refresh data
+    console.log("[Storage] Database storage initialized - data served from database");
   }
 
-  private async autoReconnect(): Promise<void> {
-    console.log("[Storage] Checking for active OLT credential to auto-reconnect...");
-    
-    try {
-      const credentials = await db.select().from(oltCredentials).where(eq(oltCredentials.isActive, true));
-      
-      if (credentials.length > 0) {
-        const credential = credentials[0];
-        console.log(`[Storage] Found active OLT: ${credential.name} (${credential.host})`);
-        console.log("[Storage] Attempting auto-reconnect...");
-        
-        const result = await this.testOltConnection(credential.id);
-        if (result.success) {
-          console.log("[Storage] Auto-reconnect successful!");
-        } else {
-          console.log(`[Storage] Auto-reconnect failed: ${result.message}`);
-        }
-      } else {
-        console.log("[Storage] No active OLT credential found, skipping auto-reconnect");
-      }
-    } catch (error) {
-      console.error("[Storage] Error during auto-reconnect:", error);
-    }
+  // Helper to convert database record to API type
+  private dbUnboundToApi(dbOnu: any): UnboundOnu {
+    return {
+      id: dbOnu.id.toString(),
+      serialNumber: dbOnu.serialNumber,
+      gponPort: dbOnu.gponPort,
+      discoveredAt: dbOnu.discoveredAt.toISOString(),
+      equipmentId: dbOnu.equipmentId || undefined,
+      softwareVersion: dbOnu.softwareVersion || undefined,
+    };
   }
 
-  private async checkAndReconnect(): Promise<void> {
-    // Only attempt reconnect if we have an active credential but SSH is disconnected
-    if (huaweiSSH.isConnected()) {
-      return; // Already connected
-    }
+  private dbBoundToApi(dbOnu: any): BoundOnu {
+    return {
+      id: dbOnu.id.toString(),
+      onuId: dbOnu.onuId,
+      serialNumber: dbOnu.serialNumber,
+      gponPort: dbOnu.gponPort,
+      description: dbOnu.description || "",
+      lineProfileId: dbOnu.lineProfileId,
+      serviceProfileId: dbOnu.serviceProfileId,
+      status: dbOnu.status as OnuStatus,
+      configState: (dbOnu.configState || "normal") as OnuConfigState,
+      rxPower: dbOnu.rxPower ?? undefined,
+      txPower: dbOnu.txPower ?? undefined,
+      distance: dbOnu.distance ?? undefined,
+      boundAt: dbOnu.boundAt.toISOString(),
+      vlanId: dbOnu.vlanId ?? undefined,
+      gemportId: dbOnu.gemportId ?? undefined,
+    };
+  }
 
-    try {
-      const credentials = await db.select().from(oltCredentials).where(eq(oltCredentials.isActive, true));
-      
-      if (credentials.length > 0 && credentials[0].isConnected) {
-        console.log("[Storage] SSH disconnected but credential marked connected, attempting reconnect...");
-        await this.testOltConnection(credentials[0].id);
-      }
-    } catch (error) {
-      // Silently ignore reconnect errors
-    }
+  private dbLineProfileToApi(dbProfile: any): LineProfile {
+    return {
+      id: dbProfile.profileId,
+      name: dbProfile.name,
+      description: dbProfile.description || "",
+      tcont: dbProfile.tcont || 0,
+      gemportId: dbProfile.gemportId || 0,
+      mappingMode: dbProfile.mappingMode || "",
+    };
+  }
+
+  private dbServiceProfileToApi(dbProfile: any): ServiceProfile {
+    return {
+      id: dbProfile.profileId,
+      name: dbProfile.name,
+      description: dbProfile.description || "",
+      portCount: dbProfile.portCount || 1,
+      portType: dbProfile.portType || "eth",
+    };
+  }
+
+  private dbVlanToApi(dbVlan: any): Vlan {
+    return {
+      id: dbVlan.vlanId,
+      name: dbVlan.name,
+      description: dbVlan.description || "",
+      type: (dbVlan.type || "standard") as "smart" | "mux" | "standard",
+      tagged: dbVlan.tagged || false,
+      inUse: dbVlan.inUse || false,
+    };
   }
 
   // Auth operations
@@ -279,72 +299,213 @@ export class DatabaseStorage implements IStorage {
           isActive: true,
           lastConnected: new Date() 
         });
-        this.oltConnected = true;
         
-        // Fetch and cache initial data from OLT
-        await this.refreshOltData();
+        // Initialize refresh tracking for this credential
+        const existing = await db.select().from(oltDataRefresh).where(eq(oltDataRefresh.oltCredentialId, id));
+        if (existing.length === 0) {
+          await db.insert(oltDataRefresh).values({ oltCredentialId: id });
+        }
         
-        return { success: true, message: "Connected to OLT successfully" };
+        return { success: true, message: "Connected to OLT successfully. Click Refresh to fetch data." };
       } else {
         await this.updateOltCredential(id, { isConnected: false });
-        this.oltConnected = false;
         return result;
       }
     } catch (error: any) {
       await this.updateOltCredential(id, { isConnected: false });
-      this.oltConnected = false;
       return { success: false, message: `Connection failed: ${error.message}` };
     }
   }
 
-  private async refreshOltData(): Promise<void> {
-    if (!huaweiSSH.isConnected()) return;
-    
+  // Public method to refresh all OLT data from device and save to database
+  async refreshOltData(): Promise<{ success: boolean; message: string }> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential) {
+      return { success: false, message: "No active OLT credential" };
+    }
+
+    if (!huaweiSSH.isConnected()) {
+      // Try to reconnect
+      const password = decryptOltPassword(credential.passwordEncrypted);
+      const connectResult = await huaweiSSH.connect({
+        host: credential.host,
+        port: credential.port,
+        username: credential.username,
+        password: password,
+      });
+      if (!connectResult.success) {
+        return { success: false, message: `Cannot connect to OLT: ${connectResult.message}` };
+      }
+    }
+
     // Wait for any ongoing refresh to complete
     if (this.refreshLock) {
       console.log("[Storage] Waiting for ongoing refresh to complete...");
       await this.refreshLock;
-      return;
+      return { success: true, message: "Refresh already in progress, data updated" };
     }
+    
+    // Mark refresh in progress
+    await db.update(oltDataRefresh)
+      .set({ refreshInProgress: true, lastError: null })
+      .where(eq(oltDataRefresh.oltCredentialId, credential.id));
     
     // Create lock promise
     let unlock: () => void;
     this.refreshLock = new Promise(resolve => { unlock = resolve; });
     
     try {
-      console.log("[Storage] Refreshing OLT data...");
+      console.log("[Storage] Refreshing OLT data from device...");
       
-      // Use combined method to get all ONU data in a single session
+      // Fetch all ONU data using unified method
       const { unbound, bound } = await huaweiSSH.getAllOnuData();
       
-      this.unboundOnus.clear();
-      unbound.forEach(onu => this.unboundOnus.set(onu.serialNumber, onu));
+      // Fetch profiles and VLANs
+      const fetchedLineProfiles = await huaweiSSH.getLineProfiles();
+      const fetchedServiceProfiles = await huaweiSSH.getServiceProfiles();
+      const fetchedVlans = await huaweiSSH.getVlans();
       
-      this.boundOnus.clear();
-      bound.forEach(onu => this.boundOnus.set(onu.serialNumber, onu));
+      // Save to database - clear old data first
+      await db.delete(unboundOnus).where(eq(unboundOnus.oltCredentialId, credential.id));
+      await db.delete(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id));
+      await db.delete(lineProfiles).where(eq(lineProfiles.oltCredentialId, credential.id));
+      await db.delete(serviceProfiles).where(eq(serviceProfiles.oltCredentialId, credential.id));
+      await db.delete(vlans).where(eq(vlans.oltCredentialId, credential.id));
       
-      // Fetch profiles
-      this.lineProfiles = await huaweiSSH.getLineProfiles();
-      this.serviceProfiles = await huaweiSSH.getServiceProfiles();
+      // Insert unbound ONUs
+      if (unbound.length > 0) {
+        await db.insert(unboundOnus).values(
+          unbound.map(onu => ({
+            serialNumber: onu.serialNumber,
+            gponPort: onu.gponPort,
+            discoveredAt: new Date(onu.discoveredAt),
+            equipmentId: onu.equipmentId || null,
+            softwareVersion: onu.softwareVersion || null,
+            oltCredentialId: credential.id,
+          }))
+        );
+      }
       
-      // Fetch VLANs
-      this.vlans = await huaweiSSH.getVlans();
+      // Insert bound ONUs
+      if (bound.length > 0) {
+        await db.insert(boundOnus).values(
+          bound.map(onu => ({
+            onuId: onu.onuId,
+            serialNumber: onu.serialNumber,
+            gponPort: onu.gponPort,
+            description: onu.description || "",
+            lineProfileId: onu.lineProfileId,
+            serviceProfileId: onu.serviceProfileId,
+            status: onu.status,
+            configState: onu.configState,
+            rxPower: onu.rxPower ?? null,
+            txPower: onu.txPower ?? null,
+            distance: onu.distance ?? null,
+            vlanId: onu.vlanId ?? null,
+            gemportId: onu.gemportId ?? null,
+            oltCredentialId: credential.id,
+            boundAt: new Date(onu.boundAt),
+          }))
+        );
+      }
       
-      console.log(`[Storage] Loaded: ${this.unboundOnus.size} unbound, ${this.boundOnus.size} bound ONUs`);
-      console.log(`[Storage] Loaded: ${this.lineProfiles.length} line profiles, ${this.serviceProfiles.length} service profiles`);
-      console.log(`[Storage] Loaded: ${this.vlans.length} VLANs`);
-    } catch (error) {
+      // Insert line profiles
+      if (fetchedLineProfiles.length > 0) {
+        await db.insert(lineProfiles).values(
+          fetchedLineProfiles.map(p => ({
+            profileId: p.id,
+            name: p.name,
+            description: p.description || "",
+            tcont: p.tcont || 0,
+            gemportId: p.gemportId || 0,
+            mappingMode: p.mappingMode || "",
+            oltCredentialId: credential.id,
+          }))
+        );
+      }
+      
+      // Insert service profiles
+      if (fetchedServiceProfiles.length > 0) {
+        await db.insert(serviceProfiles).values(
+          fetchedServiceProfiles.map(p => ({
+            profileId: p.id,
+            name: p.name,
+            description: p.description || "",
+            portCount: p.portCount || 1,
+            portType: p.portType || "eth",
+            oltCredentialId: credential.id,
+          }))
+        );
+      }
+      
+      // Insert VLANs
+      if (fetchedVlans.length > 0) {
+        await db.insert(vlans).values(
+          fetchedVlans.map(v => ({
+            vlanId: v.id,
+            name: v.name,
+            description: v.description || "",
+            type: v.type,
+            tagged: v.tagged,
+            inUse: v.inUse,
+            oltCredentialId: credential.id,
+          }))
+        );
+      }
+      
+      // Update refresh tracking
+      await db.update(oltDataRefresh)
+        .set({ lastRefreshed: new Date(), refreshInProgress: false, lastError: null })
+        .where(eq(oltDataRefresh.oltCredentialId, credential.id));
+      
+      console.log(`[Storage] Saved to DB: ${unbound.length} unbound, ${bound.length} bound ONUs`);
+      console.log(`[Storage] Saved to DB: ${fetchedLineProfiles.length} line profiles, ${fetchedServiceProfiles.length} service profiles, ${fetchedVlans.length} VLANs`);
+      
+      return { 
+        success: true, 
+        message: `Refreshed: ${unbound.length} unbound, ${bound.length} bound ONUs, ${fetchedLineProfiles.length} profiles` 
+      };
+    } catch (error: any) {
       console.error("[Storage] Error refreshing OLT data:", error);
+      
+      // Update refresh tracking with error
+      await db.update(oltDataRefresh)
+        .set({ refreshInProgress: false, lastError: error.message })
+        .where(eq(oltDataRefresh.oltCredentialId, credential.id));
+      
+      return { success: false, message: `Refresh failed: ${error.message}` };
     } finally {
       this.refreshLock = null;
       unlock!();
     }
   }
 
-  // OLT data operations
+  async getLastRefreshTime(): Promise<Date | null> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential) return null;
+    
+    const [refresh] = await db.select().from(oltDataRefresh).where(eq(oltDataRefresh.oltCredentialId, credential.id));
+    return refresh?.lastRefreshed || null;
+  }
+
+  async getRefreshStatus(): Promise<{ lastRefreshed: Date | null; inProgress: boolean; error: string | null }> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential) {
+      return { lastRefreshed: null, inProgress: false, error: "No active OLT" };
+    }
+    
+    const [refresh] = await db.select().from(oltDataRefresh).where(eq(oltDataRefresh.oltCredentialId, credential.id));
+    return {
+      lastRefreshed: refresh?.lastRefreshed || null,
+      inProgress: refresh?.refreshInProgress || false,
+      error: refresh?.lastError || null,
+    };
+  }
+
+  // OLT data operations - now read from database
   async getOltInfo(): Promise<OltInfo> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
+    if (!credential) {
       return {
         product: "Not Connected",
         version: "-",
@@ -354,147 +515,111 @@ export class DatabaseStorage implements IStorage {
       };
     }
 
-    // Get real OLT info via SSH
-    return await huaweiSSH.getOltInfo();
+    // If SSH is connected, get real OLT info
+    if (huaweiSSH.isConnected()) {
+      try {
+        return await huaweiSSH.getOltInfo();
+      } catch {
+        // Fall through to return disconnected state
+      }
+    }
+
+    return {
+      product: credential.name,
+      version: "-",
+      patch: "-",
+      uptime: "-",
+      connected: false,
+    };
   }
 
-  // Refresh ONU data using the unified method to prevent command interleaving
-  private async refreshOnuData(): Promise<void> {
-    const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
-      return;
-    }
-    
-    // Wait for any ongoing refresh to complete
-    if (this.refreshLock) {
-      console.log("[Storage] Waiting for ongoing refresh to complete...");
-      await this.refreshLock;
-      return; // Data is already refreshed, no need to do it again
-    }
-    
-    // Create lock promise
-    let unlock: () => void;
-    this.refreshLock = new Promise(resolve => { unlock = resolve; });
-    
-    try {
-      const { unbound, bound } = await huaweiSSH.getAllOnuData();
-      
-      this.unboundOnus.clear();
-      unbound.forEach(onu => this.unboundOnus.set(onu.serialNumber, onu));
-      
-      this.boundOnus.clear();
-      bound.forEach(onu => this.boundOnus.set(onu.serialNumber, onu));
-      
-      console.log(`[Storage] Refreshed ONU data: ${unbound.length} unbound, ${bound.length} bound`);
-    } catch (error) {
-      console.error("[Storage] Error refreshing ONU data:", error);
-    } finally {
-      this.refreshLock = null;
-      unlock!();
-    }
-  }
-  
   async getUnboundOnus(): Promise<UnboundOnu[]> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
-      return [];
-    }
+    if (!credential) return [];
     
-    // Refresh all ONU data using unified method
-    await this.refreshOnuData();
+    const dbOnus = await db.select().from(unboundOnus)
+      .where(eq(unboundOnus.oltCredentialId, credential.id));
     
-    return Array.from(this.unboundOnus.values()).sort(
-      (a, b) => new Date(b.discoveredAt).getTime() - new Date(a.discoveredAt).getTime()
-    );
+    return dbOnus
+      .map(onu => this.dbUnboundToApi(onu))
+      .sort((a, b) => new Date(b.discoveredAt).getTime() - new Date(a.discoveredAt).getTime());
   }
 
   async getUnboundOnuCount(): Promise<number> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
-      return 0;
-    }
-    return this.unboundOnus.size;
+    if (!credential) return 0;
+    
+    const dbOnus = await db.select().from(unboundOnus)
+      .where(eq(unboundOnus.oltCredentialId, credential.id));
+    
+    return dbOnus.length;
   }
 
   async getBoundOnus(): Promise<BoundOnu[]> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
-      return [];
-    }
+    if (!credential) return [];
     
-    // Refresh all ONU data using unified method
-    await this.refreshOnuData();
+    const dbOnus = await db.select().from(boundOnus)
+      .where(eq(boundOnus.oltCredentialId, credential.id));
     
-    return Array.from(this.boundOnus.values()).sort((a, b) => {
-      if (a.gponPort !== b.gponPort) {
-        return a.gponPort.localeCompare(b.gponPort);
-      }
-      return a.onuId - b.onuId;
-    });
+    return dbOnus
+      .map(onu => this.dbBoundToApi(onu))
+      .sort((a, b) => {
+        if (a.gponPort !== b.gponPort) {
+          return a.gponPort.localeCompare(b.gponPort);
+        }
+        return a.onuId - b.onuId;
+      });
   }
 
   async getLineProfiles(): Promise<LineProfile[]> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
-      return [];
-    }
+    if (!credential) return [];
     
-    // Refresh if empty
-    if (this.lineProfiles.length === 0) {
-      try {
-        this.lineProfiles = await huaweiSSH.getLineProfiles();
-      } catch (error) {
-        console.error("[Storage] Error fetching line profiles:", error);
-      }
-    }
+    const dbProfiles = await db.select().from(lineProfiles)
+      .where(eq(lineProfiles.oltCredentialId, credential.id));
     
-    return this.lineProfiles;
+    return dbProfiles.map(p => this.dbLineProfileToApi(p));
   }
 
   async getServiceProfiles(): Promise<ServiceProfile[]> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
-      return [];
-    }
+    if (!credential) return [];
     
-    // Refresh if empty
-    if (this.serviceProfiles.length === 0) {
-      try {
-        this.serviceProfiles = await huaweiSSH.getServiceProfiles();
-      } catch (error) {
-        console.error("[Storage] Error fetching service profiles:", error);
-      }
-    }
+    const dbProfiles = await db.select().from(serviceProfiles)
+      .where(eq(serviceProfiles.oltCredentialId, credential.id));
     
-    return this.serviceProfiles;
+    return dbProfiles.map(p => this.dbServiceProfileToApi(p));
   }
 
   async getVlans(): Promise<Vlan[]> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
-      return [];
-    }
+    if (!credential) return [];
     
-    // Refresh if empty
-    if (this.vlans.length === 0) {
-      try {
-        this.vlans = await huaweiSSH.getVlans();
-      } catch (error) {
-        console.error("[Storage] Error fetching VLANs:", error);
-      }
-    }
+    const dbVlans = await db.select().from(vlans)
+      .where(eq(vlans.oltCredentialId, credential.id));
     
-    return this.vlans.sort((a, b) => a.id - b.id);
+    return dbVlans.map(v => this.dbVlanToApi(v)).sort((a, b) => a.id - b.id);
   }
 
   async validateOnu(serialNumber: string): Promise<{ canBind: boolean; reason: string }> {
     const sn = serialNumber.toUpperCase();
+    const credential = await this.getActiveOltCredential();
+    if (!credential) {
+      return { canBind: false, reason: "No active OLT connection" };
+    }
     
-    if (this.boundOnus.has(sn)) {
+    // Check if already bound
+    const [existingBound] = await db.select().from(boundOnus)
+      .where(and(eq(boundOnus.oltCredentialId, credential.id), eq(boundOnus.serialNumber, sn)));
+    if (existingBound) {
       return { canBind: false, reason: "ONU is already bound" };
     }
     
-    if (!this.unboundOnus.has(sn)) {
+    // Check if in unbound list
+    const [existingUnbound] = await db.select().from(unboundOnus)
+      .where(and(eq(unboundOnus.oltCredentialId, credential.id), eq(unboundOnus.serialNumber, sn)));
+    if (!existingUnbound) {
       return { canBind: false, reason: "ONU not found in autofind list" };
     }
     
@@ -503,32 +628,39 @@ export class DatabaseStorage implements IStorage {
 
   async verifyOnu(serialNumber: string): Promise<OnuVerification> {
     const sn = serialNumber.toUpperCase();
+    const credential = await this.getActiveOltCredential();
     
-    const boundOnu = this.boundOnus.get(sn);
-    if (boundOnu) {
-      return {
-        serialNumber: sn,
-        isUnbound: false,
-        isBound: true,
-        isOnline: boundOnu.status === "online",
-        gponPort: boundOnu.gponPort,
-        onuId: boundOnu.onuId,
-        rxPower: boundOnu.rxPower,
-        vlanAttached: boundOnu.vlanId !== undefined,
-        message: `ONU is already bound as ONU ID ${boundOnu.onuId} on port ${boundOnu.gponPort}`,
-      };
-    }
-    
-    const unboundOnu = this.unboundOnus.get(sn);
-    if (unboundOnu) {
-      return {
-        serialNumber: sn,
-        isUnbound: true,
-        isBound: false,
-        isOnline: true,
-        gponPort: unboundOnu.gponPort,
-        message: "ONU is unconfigured and ready for binding",
-      };
+    if (credential) {
+      // Check bound ONUs
+      const [boundOnu] = await db.select().from(boundOnus)
+        .where(and(eq(boundOnus.oltCredentialId, credential.id), eq(boundOnus.serialNumber, sn)));
+      if (boundOnu) {
+        return {
+          serialNumber: sn,
+          isUnbound: false,
+          isBound: true,
+          isOnline: boundOnu.status === "online",
+          gponPort: boundOnu.gponPort,
+          onuId: boundOnu.onuId,
+          rxPower: boundOnu.rxPower ?? undefined,
+          vlanAttached: boundOnu.vlanId !== null,
+          message: `ONU is already bound as ONU ID ${boundOnu.onuId} on port ${boundOnu.gponPort}`,
+        };
+      }
+      
+      // Check unbound ONUs
+      const [unboundOnu] = await db.select().from(unboundOnus)
+        .where(and(eq(unboundOnus.oltCredentialId, credential.id), eq(unboundOnus.serialNumber, sn)));
+      if (unboundOnu) {
+        return {
+          serialNumber: sn,
+          isUnbound: true,
+          isBound: false,
+          isOnline: true,
+          gponPort: unboundOnu.gponPort,
+          message: "ONU is unconfigured and ready for binding",
+        };
+      }
     }
     
     return {
@@ -541,12 +673,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getNextFreeOnuId(gponPort: string): Promise<number> {
-    const boundOnPort = Array.from(this.boundOnus.values())
-      .filter(onu => onu.gponPort === gponPort)
-      .map(onu => onu.onuId);
+    const credential = await this.getActiveOltCredential();
+    if (!credential) throw new Error("No active OLT connection");
+    
+    const boundOnPort = await db.select().from(boundOnus)
+      .where(and(eq(boundOnus.oltCredentialId, credential.id), eq(boundOnus.gponPort, gponPort)));
+    
+    const usedIds = boundOnPort.map(onu => onu.onuId);
     
     for (let i = 0; i <= 127; i++) {
-      if (!boundOnPort.includes(i)) {
+      if (!usedIds.includes(i)) {
         return i;
       }
     }
@@ -556,7 +692,7 @@ export class DatabaseStorage implements IStorage {
 
   async bindOnu(request: BindOnuRequest): Promise<BoundOnu> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected) {
+    if (!credential) {
       throw new Error("Not connected to OLT");
     }
 
@@ -567,34 +703,35 @@ export class DatabaseStorage implements IStorage {
       throw new Error(validation.reason);
     }
     
-    const lineProfile = this.lineProfiles.find(p => p.id === request.lineProfileId);
+    // Get profiles from database
+    const dbLineProfiles = await this.getLineProfiles();
+    const dbServiceProfiles = await this.getServiceProfiles();
+    const dbVlans = await this.getVlans();
+    
+    const lineProfile = dbLineProfiles.find(p => p.id === request.lineProfileId);
     if (!lineProfile) {
       throw new Error("Line profile does not exist");
     }
     
-    const serviceProfile = this.serviceProfiles.find(p => p.id === request.serviceProfileId);
+    const serviceProfile = dbServiceProfiles.find(p => p.id === request.serviceProfileId);
     if (!serviceProfile) {
       throw new Error("Service profile does not exist");
     }
     
     if (request.vlanId) {
-      const vlan = this.vlans.find(v => v.id === request.vlanId);
+      const vlan = dbVlans.find(v => v.id === request.vlanId);
       if (!vlan) {
         throw new Error("VLAN does not exist");
       }
     }
     
     const onuId = await this.getNextFreeOnuId(request.gponPort);
-    
     const vlanId = request.vlanId || 200;
-    const vlanIndex = this.vlans.findIndex(v => v.id === vlanId);
-    if (vlanIndex !== -1) {
-      this.vlans[vlanIndex].inUse = true;
-    }
     
-    // In production, execute SSH commands to bind ONU on OLT
-    const boundOnu: BoundOnu = {
-      id: randomUUID(),
+    // TODO: Execute SSH commands to bind ONU on OLT device
+    
+    // Insert into database
+    const [newBoundOnu] = await db.insert(boundOnus).values({
       onuId,
       serialNumber: sn,
       gponPort: request.gponPort,
@@ -603,46 +740,64 @@ export class DatabaseStorage implements IStorage {
       serviceProfileId: request.serviceProfileId,
       status: "online",
       configState: "normal",
-      rxPower: -18 - Math.random() * 10,
-      txPower: 1.5 + Math.random(),
-      distance: Math.floor(500 + Math.random() * 4000),
-      boundAt: new Date().toISOString(),
+      rxPower: null,
+      txPower: null,
+      distance: null,
       vlanId,
       gemportId: lineProfile.gemportId,
-    };
+      oltCredentialId: credential.id,
+      boundAt: new Date(),
+    }).returning();
     
-    this.unboundOnus.delete(sn);
-    this.boundOnus.set(sn, boundOnu);
+    // Remove from unbound list
+    await db.delete(unboundOnus)
+      .where(and(eq(unboundOnus.oltCredentialId, credential.id), eq(unboundOnus.serialNumber, sn)));
     
-    return boundOnu;
+    // Mark VLAN as in use
+    await db.update(vlans)
+      .set({ inUse: true })
+      .where(and(eq(vlans.oltCredentialId, credential.id), eq(vlans.vlanId, vlanId)));
+    
+    return this.dbBoundToApi(newBoundOnu);
   }
 
   async unbindOnu(onuId: number, gponPort: string, cleanConfig: boolean): Promise<void> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected) {
+    if (!credential) {
       throw new Error("Not connected to OLT");
     }
 
-    const onu = Array.from(this.boundOnus.values()).find(
-      o => o.onuId === onuId && o.gponPort === gponPort
-    );
+    const [onu] = await db.select().from(boundOnus)
+      .where(and(
+        eq(boundOnus.oltCredentialId, credential.id),
+        eq(boundOnus.onuId, onuId),
+        eq(boundOnus.gponPort, gponPort)
+      ));
     
     if (!onu) {
       throw new Error("ONU not found");
     }
     
-    // In production, execute SSH commands to unbind ONU on OLT
-    this.boundOnus.delete(onu.serialNumber);
+    // TODO: Execute SSH commands to unbind ONU on OLT device
+    
+    // Remove from bound list
+    await db.delete(boundOnus)
+      .where(and(
+        eq(boundOnus.oltCredentialId, credential.id),
+        eq(boundOnus.onuId, onuId),
+        eq(boundOnus.gponPort, gponPort)
+      ));
     
     if (!cleanConfig) {
-      const unboundOnu: UnboundOnu = {
-        id: randomUUID(),
+      // Add to unbound list
+      await db.insert(unboundOnus).values({
         serialNumber: onu.serialNumber,
         gponPort: onu.gponPort,
-        discoveredAt: new Date().toISOString(),
-        equipmentId: "Unknown",
-      };
-      this.unboundOnus.set(onu.serialNumber, unboundOnu);
+        discoveredAt: new Date(),
+        equipmentId: null,
+        softwareVersion: null,
+        oltCredentialId: credential.id,
+      });
     }
   }
 }

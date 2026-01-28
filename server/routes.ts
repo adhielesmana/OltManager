@@ -276,6 +276,24 @@ export async function registerRoutes(
 
   // ==================== OLT DATA ROUTES (require auth) ====================
 
+  app.post("/api/olt/refresh", requireAuth, requirePermission("olt:configure"), async (req, res) => {
+    try {
+      const result = await storage.refreshOltData();
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message || "Failed to refresh OLT data" });
+    }
+  });
+
+  app.get("/api/olt/refresh/status", requireAuth, async (req, res) => {
+    try {
+      const status = await storage.getRefreshStatus();
+      res.json(status);
+    } catch (error) {
+      res.status(500).json({ lastRefreshed: null, inProgress: false, error: "Failed to get refresh status" });
+    }
+  });
+
   app.get("/api/olt/info", requireAuth, async (req, res) => {
     try {
       const info = await storage.getOltInfo();
