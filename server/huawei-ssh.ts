@@ -22,6 +22,10 @@ export class HuaweiSSH {
   private shellBuffer: string = "";
   private currentResolve: ((output: string) => void) | null = null;
   private commandTimeout: NodeJS.Timeout | null = null;
+  
+  // Lock for all SSH operations to prevent command interleaving
+  private operationLock: Promise<void> | null = null;
+  private pendingDataFetch: Promise<{ unbound: UnboundOnu[], bound: BoundOnu[] }> | null = null;
 
   async connect(config: HuaweiSSHConfig): Promise<{ success: boolean; message: string }> {
     return new Promise((resolve) => {
@@ -284,6 +288,24 @@ export class HuaweiSSH {
 
   // Get all ONU data in a single interface session to avoid command interleaving
   async getAllOnuData(): Promise<{ unbound: UnboundOnu[], bound: BoundOnu[] }> {
+    // If a fetch is already in progress, wait for it
+    if (this.pendingDataFetch) {
+      console.log("[SSH] Data fetch already in progress, waiting...");
+      return this.pendingDataFetch;
+    }
+    
+    // Create new fetch promise
+    this.pendingDataFetch = this.doGetAllOnuData();
+    
+    try {
+      const result = await this.pendingDataFetch;
+      return result;
+    } finally {
+      this.pendingDataFetch = null;
+    }
+  }
+  
+  private async doGetAllOnuData(): Promise<{ unbound: UnboundOnu[], bound: BoundOnu[] }> {
     try {
       // Enter GPON interface once
       await this.executeCommand("interface gpon 0/1");
@@ -296,23 +318,66 @@ export class HuaweiSSH {
       const boundOutput = await this.executeCommand("display ont info 0 all");
       const bound = this.parseBoundOnus(boundOutput, "0/1/0");
       
-      // Get optical info for bound ONUs if any
+      // Get optical info for bound ONUs if any (stay in interface mode)
       if (bound.length > 0) {
         try {
           const opticalOutput = await this.executeCommand("display ont optical-info 0 all");
           this.enrichWithOpticalInfo(bound, opticalOutput);
         } catch (err) {
-          console.log("[SSH] Could not get optical info");
+          console.log("[SSH] Could not get optical info:", err);
         }
       }
       
-      // Exit interface once
+      // Exit interface
       await this.executeCommand("quit");
+      
+      // Get descriptions (runs in config mode, not interface mode)
+      if (bound.length > 0) {
+        try {
+          await this.executeCommand("interface gpon 0/1");
+          const detailOutput = await this.executeCommand("display ont info 0 all detail");
+          this.parseDescriptions(bound, detailOutput);
+          await this.executeCommand("quit");
+        } catch (err) {
+          console.log("[SSH] Could not get ONU descriptions:", err);
+        }
+      }
       
       return { unbound, bound };
     } catch (err) {
       console.error("[SSH] Error getting ONU data:", err);
       return { unbound: [], bound: [] };
+    }
+  }
+  
+  private parseDescriptions(onus: BoundOnu[], output: string): void {
+    console.log("[SSH] Parsing descriptions, lines:", output.split("\n").length);
+    
+    let currentPort = "";
+    let currentOnuId = -1;
+    
+    for (const line of output.split("\n")) {
+      // Match F/S/P and ONT ID lines (may have spaced format)
+      const portMatch = line.match(/F\s*\/\s*S\s*\/\s*P\s*:\s*(\d+)\s*\/\s*(\d+)\s*\/\s*(\d+)/i);
+      if (portMatch) {
+        currentPort = `${portMatch[1]}/${portMatch[2]}/${portMatch[3]}`;
+      }
+      
+      const ontIdMatch = line.match(/ONT\s*-?\s*ID\s*:\s*(\d+)/i);
+      if (ontIdMatch) {
+        currentOnuId = parseInt(ontIdMatch[1]);
+      }
+      
+      // Match description line
+      const descMatch = line.match(/Description\s*:\s*(.+)/i);
+      if (descMatch && currentPort && currentOnuId >= 0) {
+        const description = descMatch[1].trim();
+        const onu = onus.find(o => o.gponPort === currentPort && o.onuId === currentOnuId);
+        if (onu && description && description !== "-") {
+          onu.description = description;
+          console.log(`[SSH] Found description: ${currentPort}/${currentOnuId} = "${description}"`);
+        }
+      }
     }
   }
 
@@ -485,23 +550,59 @@ export class HuaweiSSH {
   private enrichWithOpticalInfo(onus: BoundOnu[], output: string): void {
     const lines = output.split("\n");
     
+    console.log("[SSH] Parsing optical info, lines:", lines.length);
+    console.log("[SSH] Raw optical output:", output.substring(0, 800));
+    
+    // Check if output indicates an error
+    if (output.includes("Unknown command") || output.includes("Error:")) {
+      console.log("[SSH] Optical info command failed, skipping enrichment");
+      return;
+    }
+    
+    let foundCount = 0;
+    
     for (const line of lines) {
-      const trimmedLine = line.trim();
-      const parts = trimmedLine.split(/\s+/);
+      // Format 1: ONT-ID only (common in interface mode)
+      // Example:    0  -5.47     2.37      -9.57       43           3.300    12       1
+      const match1 = line.match(/^\s*(\d+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)/);
       
-      if (parts.length >= 4 && /^\d+\/\d+\/\d+$/.test(parts[0])) {
-        const port = parts[0];
-        const onuId = parseInt(parts[1]);
-        const rxPower = parseFloat(parts[2]);
-        const txPower = parseFloat(parts[3]);
+      if (match1) {
+        const onuId = parseInt(match1[1]);
+        const rxPower = parseFloat(match1[2]);
+        const txPower = parseFloat(match1[3]);
+        
+        // Find the ONU by ID (assumes we're in a specific port context)
+        const onu = onus.find(o => o.onuId === onuId);
+        if (onu && !isNaN(rxPower)) {
+          onu.rxPower = rxPower;
+          onu.txPower = isNaN(txPower) ? undefined : txPower;
+          console.log(`[SSH] Enriched ONU ${onuId} with optical: rx=${rxPower}, tx=${txPower}`);
+          foundCount++;
+        }
+        continue;
+      }
+      
+      // Format 2: With F/S/P port format (may have spaces)
+      // Example: 0/ 1/0   0      -17.51         2.34           -17.89           1234
+      const match2 = line.match(/^\s*(\d+)\s*\/\s*(\d+)\s*\/\s*(\d+)\s+(\d+)\s+([\d.-]+)\s+([\d.-]+)/);
+      
+      if (match2) {
+        const port = `${match2[1]}/${match2[2]}/${match2[3]}`;
+        const onuId = parseInt(match2[4]);
+        const rxPower = parseFloat(match2[5]);
+        const txPower = parseFloat(match2[6]);
         
         const onu = onus.find(o => o.gponPort === port && o.onuId === onuId);
         if (onu) {
           onu.rxPower = isNaN(rxPower) ? undefined : rxPower;
           onu.txPower = isNaN(txPower) ? undefined : txPower;
+          console.log(`[SSH] Enriched ONU ${port}/${onuId} with optical: rx=${rxPower}, tx=${txPower}`);
+          foundCount++;
         }
       }
     }
+    
+    console.log(`[SSH] Optical enrichment complete: ${foundCount}/${onus.length} ONUs updated`);
   }
 
   async getLineProfiles(): Promise<LineProfile[]> {

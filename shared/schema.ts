@@ -115,13 +115,137 @@ export const oltCredentialRequestSchema = z.object({
 });
 export type OltCredentialRequest = z.infer<typeof oltCredentialRequestSchema>;
 
-// ONU Status schemas (for OLT data - not stored in DB, fetched from OLT)
+// ONU Status schemas
 export const onuStatusSchema = z.enum(["online", "offline", "los", "auth-fail"]);
 export type OnuStatus = z.infer<typeof onuStatusSchema>;
 
 export const onuConfigStateSchema = z.enum(["normal", "failed", "initial"]);
 export type OnuConfigState = z.infer<typeof onuConfigStateSchema>;
 
+// Database tables for OLT data (cached from OLT device)
+
+// Unbound ONUs table - ONUs discovered but not yet configured
+export const unboundOnus = pgTable("unbound_onus", {
+  id: serial("id").primaryKey(),
+  serialNumber: text("serial_number").notNull().unique(),
+  gponPort: text("gpon_port").notNull(),
+  discoveredAt: timestamp("discovered_at").notNull(),
+  equipmentId: text("equipment_id"),
+  softwareVersion: text("software_version"),
+  oltCredentialId: integer("olt_credential_id").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertUnboundOnuSchema = createInsertSchema(unboundOnus).omit({
+  id: true,
+  updatedAt: true,
+});
+export type InsertUnboundOnu = z.infer<typeof insertUnboundOnuSchema>;
+export type DbUnboundOnu = typeof unboundOnus.$inferSelect;
+
+// Bound ONUs table - configured ONUs
+export const boundOnus = pgTable("bound_onus", {
+  id: serial("id").primaryKey(),
+  onuId: integer("onu_id").notNull(),
+  serialNumber: text("serial_number").notNull(),
+  gponPort: text("gpon_port").notNull(),
+  description: text("description").default(""),
+  lineProfileId: integer("line_profile_id").notNull(),
+  serviceProfileId: integer("service_profile_id").notNull(),
+  status: text("status").notNull().default("offline"),
+  configState: text("config_state").notNull().default("normal"),
+  rxPower: real("rx_power"),
+  txPower: real("tx_power"),
+  distance: integer("distance"),
+  vlanId: integer("vlan_id"),
+  gemportId: integer("gemport_id"),
+  oltCredentialId: integer("olt_credential_id").notNull(),
+  boundAt: timestamp("bound_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertBoundOnuSchema = createInsertSchema(boundOnus).omit({
+  id: true,
+  updatedAt: true,
+});
+export type InsertBoundOnu = z.infer<typeof insertBoundOnuSchema>;
+export type DbBoundOnu = typeof boundOnus.$inferSelect;
+
+// Line profiles table
+export const lineProfiles = pgTable("line_profiles", {
+  id: serial("id").primaryKey(),
+  profileId: integer("profile_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description").default(""),
+  tcont: integer("tcont").default(0),
+  gemportId: integer("gemport_id").default(0),
+  mappingMode: text("mapping_mode").default(""),
+  oltCredentialId: integer("olt_credential_id").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertLineProfileSchema = createInsertSchema(lineProfiles).omit({
+  id: true,
+  updatedAt: true,
+});
+export type InsertLineProfile = z.infer<typeof insertLineProfileSchema>;
+export type DbLineProfile = typeof lineProfiles.$inferSelect;
+
+// Service profiles table
+export const serviceProfiles = pgTable("service_profiles", {
+  id: serial("id").primaryKey(),
+  profileId: integer("profile_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description").default(""),
+  portCount: integer("port_count").default(1),
+  portType: text("port_type").default("eth"),
+  oltCredentialId: integer("olt_credential_id").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertServiceProfileSchema = createInsertSchema(serviceProfiles).omit({
+  id: true,
+  updatedAt: true,
+});
+export type InsertServiceProfile = z.infer<typeof insertServiceProfileSchema>;
+export type DbServiceProfile = typeof serviceProfiles.$inferSelect;
+
+// VLANs table
+export const vlans = pgTable("vlans", {
+  id: serial("id").primaryKey(),
+  vlanId: integer("vlan_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description").default(""),
+  type: text("type").notNull().default("standard"),
+  tagged: boolean("tagged").default(false),
+  inUse: boolean("in_use").default(false),
+  oltCredentialId: integer("olt_credential_id").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertVlanSchema = createInsertSchema(vlans).omit({
+  id: true,
+  updatedAt: true,
+});
+export type InsertVlan = z.infer<typeof insertVlanSchema>;
+export type DbVlan = typeof vlans.$inferSelect;
+
+// OLT data refresh tracking
+export const oltDataRefresh = pgTable("olt_data_refresh", {
+  id: serial("id").primaryKey(),
+  oltCredentialId: integer("olt_credential_id").notNull().unique(),
+  lastRefreshed: timestamp("last_refreshed"),
+  refreshInProgress: boolean("refresh_in_progress").default(false),
+  lastError: text("last_error"),
+});
+
+export const insertOltDataRefreshSchema = createInsertSchema(oltDataRefresh).omit({
+  id: true,
+});
+export type InsertOltDataRefresh = z.infer<typeof insertOltDataRefreshSchema>;
+export type OltDataRefresh = typeof oltDataRefresh.$inferSelect;
+
+// Zod schemas for API responses (compatible with existing types)
 export const unboundOnuSchema = z.object({
   id: z.string(),
   serialNumber: z.string(),

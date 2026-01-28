@@ -79,6 +79,9 @@ export class DatabaseStorage implements IStorage {
   private vlans: Vlan[] = [];
   private oltConnected: boolean = false;
   private reconnectInterval: NodeJS.Timeout | null = null;
+  
+  // Lock to prevent concurrent OLT data refresh operations
+  private refreshLock: Promise<void> | null = null;
 
   constructor() {
     // Auto-reconnect on startup after a short delay
@@ -297,6 +300,17 @@ export class DatabaseStorage implements IStorage {
   private async refreshOltData(): Promise<void> {
     if (!huaweiSSH.isConnected()) return;
     
+    // Wait for any ongoing refresh to complete
+    if (this.refreshLock) {
+      console.log("[Storage] Waiting for ongoing refresh to complete...");
+      await this.refreshLock;
+      return;
+    }
+    
+    // Create lock promise
+    let unlock: () => void;
+    this.refreshLock = new Promise(resolve => { unlock = resolve; });
+    
     try {
       console.log("[Storage] Refreshing OLT data...");
       
@@ -321,6 +335,9 @@ export class DatabaseStorage implements IStorage {
       console.log(`[Storage] Loaded: ${this.vlans.length} VLANs`);
     } catch (error) {
       console.error("[Storage] Error refreshing OLT data:", error);
+    } finally {
+      this.refreshLock = null;
+      unlock!();
     }
   }
 
@@ -341,20 +358,50 @@ export class DatabaseStorage implements IStorage {
     return await huaweiSSH.getOltInfo();
   }
 
+  // Refresh ONU data using the unified method to prevent command interleaving
+  private async refreshOnuData(): Promise<void> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
+      return;
+    }
+    
+    // Wait for any ongoing refresh to complete
+    if (this.refreshLock) {
+      console.log("[Storage] Waiting for ongoing refresh to complete...");
+      await this.refreshLock;
+      return; // Data is already refreshed, no need to do it again
+    }
+    
+    // Create lock promise
+    let unlock: () => void;
+    this.refreshLock = new Promise(resolve => { unlock = resolve; });
+    
+    try {
+      const { unbound, bound } = await huaweiSSH.getAllOnuData();
+      
+      this.unboundOnus.clear();
+      unbound.forEach(onu => this.unboundOnus.set(onu.serialNumber, onu));
+      
+      this.boundOnus.clear();
+      bound.forEach(onu => this.boundOnus.set(onu.serialNumber, onu));
+      
+      console.log(`[Storage] Refreshed ONU data: ${unbound.length} unbound, ${bound.length} bound`);
+    } catch (error) {
+      console.error("[Storage] Error refreshing ONU data:", error);
+    } finally {
+      this.refreshLock = null;
+      unlock!();
+    }
+  }
+  
   async getUnboundOnus(): Promise<UnboundOnu[]> {
     const credential = await this.getActiveOltCredential();
     if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
       return [];
     }
     
-    // Refresh unbound ONU data from OLT
-    try {
-      const unboundList = await huaweiSSH.getUnboundOnus();
-      this.unboundOnus.clear();
-      unboundList.forEach(onu => this.unboundOnus.set(onu.serialNumber, onu));
-    } catch (error) {
-      console.error("[Storage] Error fetching unbound ONUs:", error);
-    }
+    // Refresh all ONU data using unified method
+    await this.refreshOnuData();
     
     return Array.from(this.unboundOnus.values()).sort(
       (a, b) => new Date(b.discoveredAt).getTime() - new Date(a.discoveredAt).getTime()
@@ -375,14 +422,8 @@ export class DatabaseStorage implements IStorage {
       return [];
     }
     
-    // Refresh bound ONU data from OLT
-    try {
-      const boundList = await huaweiSSH.getBoundOnus();
-      this.boundOnus.clear();
-      boundList.forEach(onu => this.boundOnus.set(onu.serialNumber, onu));
-    } catch (error) {
-      console.error("[Storage] Error fetching bound ONUs:", error);
-    }
+    // Refresh all ONU data using unified method
+    await this.refreshOnuData();
     
     return Array.from(this.boundOnus.values()).sort((a, b) => {
       if (a.gponPort !== b.gponPort) {
