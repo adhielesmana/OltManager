@@ -513,8 +513,8 @@ deploy_application() {
         create_startup_script
     fi
     
-    # Build the image
-    docker build -t "${DOCKER_IMAGE}" .
+    # Build the image (--no-cache ensures fresh build with latest code)
+    docker build --no-cache -t "${DOCKER_IMAGE}" .
     log_success "Docker image built successfully"
     
     # Stop and remove existing container if running
