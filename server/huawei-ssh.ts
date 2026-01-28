@@ -1,4 +1,4 @@
-import { Client } from "ssh2";
+import { Client, ClientChannel } from "ssh2";
 import type { UnboundOnu, BoundOnu, LineProfile, ServiceProfile, Vlan, OltInfo } from "@shared/schema";
 
 export interface HuaweiSSHConfig {
@@ -12,6 +12,16 @@ export class HuaweiSSH {
   private client: Client | null = null;
   private config: HuaweiSSHConfig | null = null;
   private connected: boolean = false;
+  private shell: ClientChannel | null = null;
+  private commandQueue: Array<{
+    command: string;
+    resolve: (output: string) => void;
+    reject: (error: Error) => void;
+  }> = [];
+  private isExecuting: boolean = false;
+  private shellBuffer: string = "";
+  private currentResolve: ((output: string) => void) | null = null;
+  private commandTimeout: NodeJS.Timeout | null = null;
 
   async connect(config: HuaweiSSHConfig): Promise<{ success: boolean; message: string }> {
     return new Promise((resolve) => {
@@ -23,11 +33,18 @@ export class HuaweiSSH {
         resolve({ success: false, message: "Connection timeout" });
       }, 30000);
 
-      this.client.on("ready", () => {
+      this.client.on("ready", async () => {
         clearTimeout(timeout);
         this.connected = true;
         console.log(`[SSH] Connected to OLT at ${config.host}`);
-        resolve({ success: true, message: "Connected to OLT successfully" });
+        
+        // Open persistent shell
+        try {
+          await this.openShell();
+          resolve({ success: true, message: "Connected to OLT successfully" });
+        } catch (err: any) {
+          resolve({ success: false, message: `Failed to open shell: ${err.message}` });
+        }
       });
 
       this.client.on("error", (err) => {
@@ -39,6 +56,7 @@ export class HuaweiSSH {
 
       this.client.on("close", () => {
         this.connected = false;
+        this.shell = null;
         console.log("[SSH] Connection closed");
       });
 
@@ -76,78 +94,138 @@ export class HuaweiSSH {
     });
   }
 
-  disconnect(): void {
-    if (this.client) {
-      this.client.end();
-      this.client = null;
-    }
-    this.connected = false;
-  }
-
-  isConnected(): boolean {
-    return this.connected;
-  }
-
-  async executeCommand(command: string): Promise<string> {
+  private openShell(): Promise<void> {
     return new Promise((resolve, reject) => {
-      if (!this.client || !this.connected) {
-        reject(new Error("Not connected to OLT"));
+      if (!this.client) {
+        reject(new Error("Not connected"));
         return;
       }
 
-      let output = "";
-      let buffer = "";
-
-      this.client.shell((err, stream) => {
+      this.client.shell({ term: "vt100" }, (err, stream) => {
         if (err) {
           reject(err);
           return;
         }
 
-        const timeout = setTimeout(() => {
-          stream.end();
-          resolve(output);
-        }, 15000);
+        this.shell = stream;
+        this.shellBuffer = "";
 
         stream.on("data", (data: Buffer) => {
           const text = data.toString();
-          buffer += text;
-          output += text;
+          this.shellBuffer += text;
 
-          // Check for command completion indicators
-          if (buffer.includes("---- More") || buffer.includes("--More--")) {
+          // Handle "More" prompts automatically
+          if (this.shellBuffer.includes("---- More") || this.shellBuffer.includes("--More--")) {
             stream.write(" ");
-            buffer = "";
-          } else if (buffer.includes(">") || buffer.includes("#") || buffer.includes("End of configuration")) {
-            if (output.includes(command) && output.length > command.length + 100) {
-              clearTimeout(timeout);
-              setTimeout(() => {
-                stream.end();
-                resolve(output);
-              }, 500);
+            this.shellBuffer = this.shellBuffer.replace(/---- More.*----/g, "").replace(/--More--/g, "");
+          }
+
+          // Check for command completion (prompt returned)
+          if (this.currentResolve && (
+            this.shellBuffer.match(/[\r\n][^\r\n]*[>#]\s*$/) ||
+            this.shellBuffer.includes("end of configuration")
+          )) {
+            // Give a small delay to collect any remaining output
+            if (this.commandTimeout) {
+              clearTimeout(this.commandTimeout);
             }
+            this.commandTimeout = setTimeout(() => {
+              if (this.currentResolve) {
+                this.currentResolve(this.shellBuffer);
+                this.currentResolve = null;
+                this.shellBuffer = "";
+                this.isExecuting = false;
+                this.processQueue();
+              }
+            }, 300);
           }
         });
 
         stream.on("close", () => {
-          clearTimeout(timeout);
-          resolve(output);
+          this.shell = null;
+          console.log("[SSH] Shell closed");
         });
 
         stream.on("error", (err: Error) => {
-          clearTimeout(timeout);
-          reject(err);
+          console.error("[SSH] Shell error:", err);
         });
 
-        // Send enable command first, then the actual command
+        // Wait for initial prompt, then enter enable and config mode
         setTimeout(() => {
+          console.log("[SSH] Sending 'enable' command...");
           stream.write("enable\n");
           setTimeout(() => {
-            stream.write(command + "\n");
-          }, 500);
-        }, 1000);
+            console.log("[SSH] Sending 'config' command...");
+            stream.write("config\n");
+            setTimeout(() => {
+              console.log("[SSH] Shell ready in config mode");
+              this.shellBuffer = "";
+              resolve();
+            }, 1500);
+          }, 1500);
+        }, 1500);
       });
     });
+  }
+
+  disconnect(): void {
+    if (this.shell) {
+      this.shell.end();
+      this.shell = null;
+    }
+    if (this.client) {
+      this.client.end();
+      this.client = null;
+    }
+    this.connected = false;
+    this.commandQueue = [];
+    this.isExecuting = false;
+  }
+
+  isConnected(): boolean {
+    return this.connected && this.shell !== null;
+  }
+
+  async executeCommand(command: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      if (!this.shell || !this.connected) {
+        reject(new Error("Not connected to OLT"));
+        return;
+      }
+
+      // Add to queue
+      this.commandQueue.push({ command, resolve, reject });
+      this.processQueue();
+    });
+  }
+
+  private processQueue(): void {
+    if (this.isExecuting || this.commandQueue.length === 0 || !this.shell) {
+      return;
+    }
+
+    const { command, resolve, reject } = this.commandQueue.shift()!;
+    this.isExecuting = true;
+    this.currentResolve = resolve;
+    this.shellBuffer = "";
+
+    // Set timeout for command
+    if (this.commandTimeout) {
+      clearTimeout(this.commandTimeout);
+    }
+    this.commandTimeout = setTimeout(() => {
+      if (this.currentResolve) {
+        console.log(`[SSH] Command timeout: ${command}`);
+        this.currentResolve(this.shellBuffer);
+        this.currentResolve = null;
+        this.isExecuting = false;
+        this.processQueue();
+      }
+    }, 15000);
+
+    // Send command
+    console.log(`[SSH] Executing: ${command}`);
+    this.shell.write(command + "\n");
   }
 
   async getOltInfo(): Promise<OltInfo> {
@@ -192,14 +270,12 @@ export class HuaweiSSH {
     const onus: UnboundOnu[] = [];
     const lines = output.split("\n");
 
-    // Parse Huawei autofind output format:
-    // Frame/Slot/Port  Sn             EquipmentId         VendorId  Version
-    // 0/2/0            485754430C9A3F05 HG8310M           HWTC      V3R017C10S120
+    console.log("[SSH] Parsing autofind output, lines:", lines.length);
 
     for (const line of lines) {
       const trimmedLine = line.trim();
       
-      // Look for port indication
+      // Look for port indication with SN
       const parts = trimmedLine.split(/\s+/);
       if (parts.length >= 2 && /^\d+\/\d+\/\d+$/.test(parts[0])) {
         const port = parts[0];
@@ -221,19 +297,15 @@ export class HuaweiSSH {
         }
       }
       
-      // Alternative format parsing - look for SN patterns
-      const snMatch = trimmedLine.match(/SN\s*:\s*([A-Fa-f0-9]{16})/i);
+      // Alternative format - look for SN patterns
+      const snMatch = trimmedLine.match(/SN\s*[:\s]\s*([A-Fa-f0-9]{16})/i);
       if (snMatch) {
         const sn = snMatch[1].toUpperCase();
-        // Look for associated port in nearby lines
-        const portInfo = output.match(new RegExp(`F/S/P\\s*:\\s*(\\d+/\\d+/\\d+)[\\s\\S]{0,100}${sn}`, 'i')) ||
-                        output.match(new RegExp(`${sn}[\\s\\S]{0,100}F/S/P\\s*:\\s*(\\d+/\\d+/\\d+)`, 'i'));
-        
         if (!onus.find(o => o.serialNumber === sn)) {
           onus.push({
             id: sn,
             serialNumber: sn,
-            gponPort: portInfo ? portInfo[1] : "0/0/0",
+            gponPort: "0/0/0",
             equipmentId: "Unknown",
             discoveredAt: new Date().toISOString(),
           });
@@ -247,16 +319,17 @@ export class HuaweiSSH {
 
   async getBoundOnus(): Promise<BoundOnu[]> {
     try {
-      // Get all ONT info - this command may vary based on OLT model
       const output = await this.executeCommand("display ont info 0 all");
       const onus = this.parseBoundOnus(output);
       
-      // Get optical info for status
-      try {
-        const opticalOutput = await this.executeCommand("display ont optical-info 0 all");
-        this.enrichWithOpticalInfo(onus, opticalOutput);
-      } catch (err) {
-        console.log("[SSH] Could not get optical info:", err);
+      // Get optical info for status if we have bound ONUs
+      if (onus.length > 0) {
+        try {
+          const opticalOutput = await this.executeCommand("display ont optical-info 0 all");
+          this.enrichWithOpticalInfo(onus, opticalOutput);
+        } catch (err) {
+          console.log("[SSH] Could not get optical info");
+        }
       }
       
       return onus;
@@ -270,10 +343,7 @@ export class HuaweiSSH {
     const onus: BoundOnu[] = [];
     const lines = output.split("\n");
 
-    // Parse Huawei display ont info format:
-    // F/S/P   ONT   SN                  Control    Run      Config   Match    Protect
-    //                                   flag       state    state    state    side
-    // 0/2/0   1     485754430C9A3F05    active     online   normal   match    no
+    console.log("[SSH] Parsing bound ONU output, lines:", lines.length);
 
     for (const line of lines) {
       const trimmedLine = line.trim();
@@ -334,8 +404,6 @@ export class HuaweiSSH {
       const trimmedLine = line.trim();
       const parts = trimmedLine.split(/\s+/);
       
-      // Parse optical info format
-      // F/S/P ONT-ID Rx-Power(dBm) Tx-Power(dBm) OLT-Rx-Power(dBm) Temperature
       if (parts.length >= 4 && /^\d+\/\d+\/\d+$/.test(parts[0])) {
         const port = parts[0];
         const onuId = parseInt(parts[1]);
@@ -365,9 +433,6 @@ export class HuaweiSSH {
     const profiles: LineProfile[] = [];
     const lines = output.split("\n");
 
-    // Parse profile list
-    // Profile-ID  Profile-name
-    // 1           FTTH-100M
     for (const line of lines) {
       const match = line.trim().match(/^(\d+)\s+(\S+)/);
       if (match) {
@@ -441,9 +506,6 @@ export class HuaweiSSH {
     const vlans: Vlan[] = [];
     const lines = output.split("\n");
 
-    // Parse VLAN list
-    // VLAN-ID  Description
-    // 100      Internet
     for (const line of lines) {
       const match = line.trim().match(/^(\d+)\s*(.*)/);
       if (match) {
