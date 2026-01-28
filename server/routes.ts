@@ -1,6 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { huaweiSSH } from "./huawei-ssh";
 import { 
   bindOnuRequestSchema, 
   unbindOnuRequestSchema, 
@@ -385,15 +386,27 @@ export async function registerRoutes(
     }
   });
 
-  // Get available GPON ports (from unbound ONUs discovered on different ports)
+  // Get available GPON ports from OLT via SSH
   app.get("/api/gpon-ports", requireAuth, requirePermission("onu:view"), async (req, res) => {
+    // Fallback to 16 ports (2 slots x 8 ports each) as default
+    const defaultPorts = [
+      "0/1/0", "0/1/1", "0/1/2", "0/1/3", "0/1/4", "0/1/5", "0/1/6", "0/1/7",
+      "0/2/0", "0/2/1", "0/2/2", "0/2/3", "0/2/4", "0/2/5", "0/2/6", "0/2/7"
+    ];
+    
     try {
-      // For MA5801, typically ports are 0/1/0 through 0/1/7 (8 ports per board)
-      // Return common ports plus any discovered from unbound ONUs
-      const defaultPorts = ["0/1/0", "0/1/1", "0/1/2", "0/1/3", "0/1/4", "0/1/5", "0/1/6", "0/1/7"];
-      res.json(defaultPorts);
+      // Try to get ports from SSH if connected
+      const sshPorts = await huaweiSSH.getGponPorts();
+      
+      if (sshPorts.length > 0) {
+        res.json(sshPorts);
+      } else {
+        res.json(defaultPorts);
+      }
     } catch (error) {
-      res.status(500).json({ error: "Failed to get GPON ports" });
+      // On any error, return default ports
+      console.error("[Routes] Error getting GPON ports:", error);
+      res.json(defaultPorts);
     }
   });
 
