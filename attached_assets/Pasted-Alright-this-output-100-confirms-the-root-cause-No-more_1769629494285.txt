@@ -1,0 +1,193 @@
+Alright — this output **100% confirms the root cause**.
+No more guessing, no more Nginx work needed.
+
+> ❌ `Recv failure: Connection reset by peer`
+
+That means **your app accepts the TCP connection and immediately closes it**.
+This is **pure application/container startup behavior**, not proxy, not SSL.
+
+---
+
+## 🔥 FINAL DIAGNOSIS (definitive)
+
+### Your container is running
+
+### Docker port mapping is correct
+
+### Nginx is correct
+
+### ❌ **The app inside the container is broken / misconfigured**
+
+Specifically, **one of these is happening** (ranked by probability):
+
+---
+
+## 🚨 Root Cause #1 (MOST COMMON): app binds to `127.0.0.1` inside container
+
+Inside Docker, this is fatal.
+
+### ❌ WRONG
+
+```python
+app.run(host="127.0.0.1", port=5000)
+```
+
+```bash
+gunicorn app:app --bind 127.0.0.1:5000
+```
+
+```js
+app.listen(5000, "localhost")
+```
+
+### ✅ REQUIRED
+
+```python
+app.run(host="0.0.0.0", port=5000)
+```
+
+```bash
+gunicorn app:app --bind 0.0.0.0:5000
+```
+
+```js
+app.listen(5000, "0.0.0.0")
+```
+
+If this is wrong → **Docker will still map the port, but nothing can talk to it** → connection reset.
+
+---
+
+## 🚨 Root Cause #2: app crashes right after accepting connection
+
+Common causes:
+
+* missing ENV vars
+* DB / Redis not reachable
+* config file not found
+* permission error
+* panic/exception on first request
+
+This produces **exactly** your symptom.
+
+---
+
+## 🚨 Root Cause #3: app expects HTTPS but receives HTTP
+
+If your app is started with:
+
+```bash
+--ssl
+```
+
+or:
+
+```python
+ssl_context=...
+```
+
+Then Nginx sends **plain HTTP** → app resets connection.
+
+(rare, but I’ve seen it)
+
+---
+
+## 🚨 Root Cause #4: broken healthcheck killing the process
+
+Earlier you had:
+
+```
+health: starting
+```
+
+If Docker healthcheck fails:
+
+* container stays running
+* app process gets killed/restarted
+* every request = reset
+
+---
+
+## 🧪 PROOF TEST (inside the container)
+
+Run this **right now**:
+
+```bash
+docker exec -it huawei-olt-manager sh
+```
+
+Then inside:
+
+```bash
+curl http://127.0.0.1:5000
+```
+
+### Results:
+
+* ❌ reset → app binding issue
+* ❌ refused → app not running
+* ✅ works → startup wrapper / CMD problem
+
+---
+
+## 🔧 THE FIX (step-by-step, no guessing)
+
+### 1️⃣ Show me the logs (this will end it fast)
+
+```bash
+docker logs huawei-olt-manager --tail=200
+```
+
+You WILL see the reason.
+
+---
+
+### 2️⃣ Check how the app is started
+
+```bash
+docker inspect huawei-olt-manager --format '{{.Config.Cmd}}'
+docker inspect huawei-olt-manager --format '{{.Config.Entrypoint}}'
+```
+
+Paste the output.
+
+---
+
+### 3️⃣ Check the Dockerfile (critical)
+
+I’m specifically looking for:
+
+* `CMD`
+* `ENTRYPOINT`
+* `EXPOSE`
+* `HEALTHCHECK`
+
+---
+
+## 🧠 Why I’m 100% sure this is NOT Nginx anymore
+
+Because:
+
+```bash
+curl http://127.0.0.1:3005
+```
+
+❌ fails **without Nginx involved**
+
+That single command proves:
+
+> the app itself is resetting the connection
+
+---
+
+## 🎯 What to send next (pick ONE)
+
+To finish this in one reply, send **one of these**:
+
+1. `docker logs huawei-olt-manager`
+2. App language/framework
+3. `Dockerfile`
+4. App start command
+
+You’re at the **last mile** now.
+Once the app listens correctly, **HTTPS will instantly work** — no further infra changes needed 💪
