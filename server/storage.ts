@@ -396,13 +396,15 @@ export class DatabaseStorage implements IStorage {
     try {
       console.log("[Storage] Refreshing OLT data from device...");
       
+      // Fetch VLANs first as they might be cached from initial connection
+      const fetchedVlans = await huaweiSSH.getVlans();
+      
       // Fetch all ONU data using unified method
       const { unbound, bound } = await huaweiSSH.getAllOnuData();
       
-      // Fetch profiles and VLANs
+      // Fetch profiles
       const fetchedLineProfiles = await huaweiSSH.getLineProfiles();
       const fetchedServiceProfiles = await huaweiSSH.getServiceProfiles();
-      const fetchedVlans = await huaweiSSH.getVlans();
       
       // Save to database - clear old data first
       await db.delete(unboundOnus).where(eq(unboundOnus.oltCredentialId, credential.id));

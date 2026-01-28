@@ -22,6 +22,7 @@ export class HuaweiSSH {
   private shellBuffer: string = "";
   private currentResolve: ((output: string) => void) | null = null;
   private commandTimeout: NodeJS.Timeout | null = null;
+  private lastVlanOutput: string = "";
   
   // Lock for all SSH operations to prevent command interleaving
   private operationLock: Promise<void> | null = null;
@@ -188,6 +189,16 @@ export class HuaweiSSH {
         // Initial delay to wait for login banner
         setTimeout(async () => {
           await waitForPrompt("enable", 2000);
+          
+          // Fetch VLANs immediately after enable and before config
+          try {
+            console.log("[SSH] Fetching VLANs in enable mode...");
+            const vlanOutput = await this.executeCommand("display vlan all");
+            this.lastVlanOutput = vlanOutput; // Store for later fetch
+          } catch (vlanErr) {
+            console.error("[SSH] Early VLAN fetch failed:", vlanErr);
+          }
+
           await waitForPrompt("config", 2000);
           console.log("[SSH] Shell ready in config mode");
           this.shellBuffer = "";
@@ -686,10 +697,16 @@ export class HuaweiSSH {
 
   async getVlans(): Promise<Vlan[]> {
     try {
-      // Exit config mode to enable mode for VLAN command
+      // If we have a stored output from the initial connection, use it
+      if (this.lastVlanOutput) {
+        const output = this.lastVlanOutput;
+        this.lastVlanOutput = ""; // Clear after use
+        return this.parseVlans(output);
+      }
+
+      // Otherwise, we need to quit config mode to run it
       await this.executeCommand("quit");
       const output = await this.executeCommand("display vlan all");
-      // Return to config mode for other operations
       await this.executeCommand("config");
       return this.parseVlans(output);
     } catch (err) {
