@@ -880,43 +880,49 @@ export class HuaweiSSH {
       await this.executeCommand("quit");
       await this.executeCommand("config");
       
-      // Step 2: Check service ports from system-view (MUST be in config mode, NOT interface gpon)
-      const spCmd = "display service-port ont " + String(frame) + "/" + String(slot) + "/" + String(port) + " " + String(onuId);
-      console.log(`[SSH] Step 2: Checking service ports with: ${spCmd}`);
+      // Step 2: Check ALL service ports from system-view, then filter for our ONU
+      const spCmd = "display service-port all";
+      console.log(`[SSH] Step 2: Checking all service ports with: ${spCmd}`);
       const spOutput = await this.executeCommand(spCmd);
-      console.log(`[SSH] Service port raw output:`);
-      console.log(spOutput);
+      console.log(`[SSH] Service port raw output (first 500 chars):`);
+      console.log(spOutput.substring(0, 500));
       
-      // Check for command errors - "Unknown command" means we're in wrong mode or syntax error
+      // Check for command errors
       if (spOutput.includes("Unknown command") || spOutput.includes("Error locates at")) {
         console.log(`[SSH] ERROR: Command failed - likely wrong CLI mode or syntax error`);
         await this.executeCommand("quit");
         return { success: false, message: `Failed to check service ports: ${spOutput.substring(0, 200)}` };
       }
       
-      // Step 3: Parse and delete any service ports found
+      // Step 3: Parse and find service ports for THIS specific ONU
       // Format example: "  0   100  common  gpon  0/1/0   0   1   eth   1  ..."
+      // Columns: INDEX VLAN VLAN-ATTR PORT-TYPE F/S/P ONT-ID MULTI-SER ETH-PORT ...
       const servicePortIds: number[] = [];
+      const targetFSP = `${frame}/${slot}/${port}`;
+      const targetOnuId = String(onuId);
       
-      // Only parse if we don't have "No service virtual port"
-      if (!spOutput.includes("No service virtual port")) {
-        const lines = spOutput.split('\n');
-        for (const line of lines) {
-          // Skip header lines and empty lines
-          const trimmedLine = line.trim();
-          if (!trimmedLine || trimmedLine.startsWith('-') || trimmedLine.startsWith('INDEX') || 
-              trimmedLine.includes('Command:') || trimmedLine.includes('display')) {
-            continue;
-          }
+      console.log(`[SSH] Looking for service ports matching F/S/P=${targetFSP} ONT-ID=${targetOnuId}`);
+      
+      const lines = spOutput.split('\n');
+      for (const line of lines) {
+        const trimmedLine = line.trim();
+        // Skip header lines, dashes, and empty lines
+        if (!trimmedLine || trimmedLine.startsWith('-') || trimmedLine.startsWith('INDEX') || 
+            trimmedLine.includes('Command:') || trimmedLine.includes('display') ||
+            trimmedLine.includes('Total:')) {
+          continue;
+        }
+        
+        const parts = trimmedLine.split(/\s+/);
+        // Need at least: INDEX, VLAN, VLAN-ATTR, PORT-TYPE, F/S/P, ONT-ID
+        if (parts.length >= 6) {
+          const spIndex = parseInt(parts[0]);
+          const fsp = parts[4]; // F/S/P column
+          const ontId = parts[5]; // ONT-ID column
           
-          const parts = trimmedLine.split(/\s+/);
-          // First column should be the service-port index number
-          if (parts.length >= 2) {
-            const spIndex = parseInt(parts[0]);
-            if (!isNaN(spIndex) && spIndex >= 0) {
-              servicePortIds.push(spIndex);
-              console.log(`[SSH] Found service-port ID: ${spIndex}`);
-            }
+          if (!isNaN(spIndex) && spIndex >= 0 && fsp === targetFSP && ontId === targetOnuId) {
+            servicePortIds.push(spIndex);
+            console.log(`[SSH] Found matching service-port ID: ${spIndex} for ${fsp} ONT ${ontId}`);
           }
         }
       }
