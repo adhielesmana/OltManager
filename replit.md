@@ -165,6 +165,42 @@ shared/
 - Routing: wouter
 - State: Database for users/sessions, in-memory for OLT data (fetched via SSH)
 
+## Self-Hosted Deployment
+
+### Quick Deploy
+```bash
+# Basic deployment
+./deploy.sh --domain olt.yourdomain.com --email admin@yourdomain.com
+
+# Skip SSL (for testing)
+./deploy.sh --domain olt.yourdomain.com --skip-ssl
+
+# Custom starting port
+./deploy.sh --domain olt.yourdomain.com --port 8080
+```
+
+### Deployment Features
+1. **Auto Port Detection** - Finds next available port if default is in use
+2. **Smart Nginx Setup** - Skips installation if already present, only creates config
+3. **Config Preservation** - Won't overwrite existing nginx config for this app
+4. **Auto SSL** - Configures Let's Encrypt with auto-renewal (skips if already configured)
+5. **Database Backup** - Automatic backup before every deployment (keeps last 7)
+6. **Docker Cleanup** - Removes unused containers, images, and cache older than 24h
+
+### Environment Variables
+- `DATABASE_URL` - PostgreSQL connection string
+- `SESSION_SECRET` - Session encryption secret (auto-generated if not set)
+- `DOMAIN` - Domain name (can also use --domain flag)
+- `EMAIL` - Email for Let's Encrypt (can also use --email flag)
+
+### Docker Commands
+```bash
+docker logs -f huawei-olt-manager  # View logs
+docker stop huawei-olt-manager     # Stop
+docker start huawei-olt-manager    # Start
+docker restart huawei-olt-manager  # Restart
+```
+
 ## User Preferences
 - Professional network operations theme
 - Dark/light mode support
