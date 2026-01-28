@@ -103,6 +103,109 @@ setup_nginx() {
 }
 
 # ============================================================
+# Helper: Validate nginx config file for corruption
+# ============================================================
+validate_nginx_config() {
+    local config_file=$1
+    
+    if [ ! -f "$config_file" ]; then
+        return 1
+    fi
+    
+    # Check for ANSI escape codes (corruption indicator)
+    if grep -qP '\x1b\[' "$config_file" 2>/dev/null; then
+        log_warn "Nginx config contains ANSI escape codes (corrupted)" >&2
+        return 1
+    fi
+    
+    # Check for valid port number in proxy_pass
+    local port_in_config=$(grep -oP 'proxy_pass http://127\.0\.0\.1:\K[0-9]+' "$config_file" 2>/dev/null | head -1)
+    if [ -z "$port_in_config" ]; then
+        log_warn "Nginx config has invalid or missing port" >&2
+        return 1
+    fi
+    
+    # Check if nginx considers config valid
+    if ! nginx -t 2>/dev/null; then
+        log_warn "Nginx config fails validation test" >&2
+        return 1
+    fi
+    
+    return 0
+}
+
+# ============================================================
+# Helper: Get port from existing nginx config
+# ============================================================
+get_nginx_config_port() {
+    local config_file="${NGINX_CONF_DIR}/${APP_NAME}"
+    if [ -f "$config_file" ]; then
+        grep -oP 'proxy_pass http://127\.0\.0\.1:\K[0-9]+' "$config_file" 2>/dev/null | head -1
+    fi
+}
+
+# ============================================================
+# Helper: Get port from running Docker container
+# ============================================================
+get_container_port() {
+    docker port "${CONTAINER_NAME}" 5000 2>/dev/null | grep -oP ':\K[0-9]+' | head -1
+}
+
+# ============================================================
+# Diagnose and auto-repair port/nginx issues
+# ============================================================
+diagnose_and_repair() {
+    log_info "Running diagnostics..."
+    
+    local nginx_port=$(get_nginx_config_port)
+    local container_port=$(get_container_port)
+    local saved_port=""
+    local issues_found=false
+    
+    # Load saved port if exists
+    if [ -f ".env.production" ]; then
+        saved_port=$(grep '^SAVED_APP_PORT=' .env.production 2>/dev/null | cut -d= -f2)
+    fi
+    
+    log_info "Current state:"
+    log_info "  - Nginx config port: ${nginx_port:-NOT SET}"
+    log_info "  - Docker container port: ${container_port:-NOT RUNNING}"
+    log_info "  - Saved port (.env.production): ${saved_port:-NOT SET}"
+    
+    # Check for nginx config corruption
+    local config_file="${NGINX_CONF_DIR}/${APP_NAME}"
+    if [ -f "$config_file" ] && ! validate_nginx_config "$config_file"; then
+        log_warn "Issue: Nginx config is corrupted"
+        issues_found=true
+    fi
+    
+    # Check for port mismatch between nginx and container
+    if [ -n "$nginx_port" ] && [ -n "$container_port" ] && [ "$nginx_port" != "$container_port" ]; then
+        log_warn "Issue: Port mismatch - nginx:$nginx_port vs container:$container_port"
+        log_warn "  This causes 502 Bad Gateway errors!"
+        issues_found=true
+    fi
+    
+    # Return the port that should be used
+    if [ -n "$container_port" ]; then
+        # Container is running, use its port
+        echo "$container_port"
+    elif [ -n "$saved_port" ]; then
+        # Use saved port
+        echo "$saved_port"
+    elif [ -n "$nginx_port" ]; then
+        # Use nginx port
+        echo "$nginx_port"
+    fi
+    
+    if [ "$issues_found" = true ]; then
+        log_warn "Issues detected - deployment will auto-repair" >&2
+    else
+        log_success "No issues detected" >&2
+    fi
+}
+
+# ============================================================
 # 3. Create Nginx configuration (skip if exists)
 # ============================================================
 create_nginx_config() {
@@ -112,25 +215,31 @@ create_nginx_config() {
     log_info "Checking Nginx configuration for ${APP_NAME}..."
     
     if [ -f "$config_file" ]; then
-        log_info "Nginx configuration already exists"
+        log_info "Nginx configuration file exists, validating..."
         
         # Validate existing config
-        if ! nginx -t 2>/dev/null; then
-            log_warn "Existing Nginx config is invalid, recreating..."
+        if ! validate_nginx_config "$config_file"; then
+            log_warn "Existing Nginx config is corrupted or invalid, recreating..."
             rm -f "$config_file" "${NGINX_ENABLED_DIR}/${APP_NAME}"
             # Fall through to create new config
         else
-            # Update port in existing config if different
-            if grep -q "proxy_pass http://127.0.0.1:${port}" "$config_file"; then
-                log_info "Port configuration is up to date"
+            # Config is valid, check if port matches
+            local current_port=$(get_nginx_config_port)
+            if [ "$current_port" = "$port" ]; then
+                log_success "Nginx configuration is valid and port matches ($port)"
+                return 0
             else
-                log_warn "Updating port in existing configuration..."
-                # Match any characters after the colon (not just numbers) to handle corrupted configs
-                sed -i "s|proxy_pass http://127.0.0.1:[^;]*;|proxy_pass http://127.0.0.1:${port};|g" "$config_file"
-                nginx -t && systemctl reload nginx
-                log_success "Port updated in Nginx configuration"
+                log_warn "Port mismatch: nginx=$current_port, requested=$port. Updating..."
+                sed -i "s|proxy_pass http://127.0.0.1:[0-9]*;|proxy_pass http://127.0.0.1:${port};|g" "$config_file"
+                if nginx -t 2>/dev/null; then
+                    systemctl reload nginx
+                    log_success "Port updated in Nginx configuration to $port"
+                    return 0
+                else
+                    log_warn "Config update failed validation, recreating..."
+                    rm -f "$config_file" "${NGINX_ENABLED_DIR}/${APP_NAME}"
+                fi
             fi
-            return 0
         fi
     fi
     
@@ -526,6 +635,41 @@ main() {
                 SKIP_NGINX=true
                 shift
                 ;;
+            --diagnose)
+                log_info "Diagnosing current deployment state..."
+                echo ""
+                diagnose_and_repair > /dev/null
+                echo ""
+                log_info "Run with --repair to auto-fix issues, or run without flags to redeploy"
+                exit 0
+                ;;
+            --repair)
+                log_info "Repairing deployment..."
+                echo ""
+                
+                # Load saved config
+                if [ -f ".env.production" ]; then
+                    source .env.production
+                fi
+                
+                # Diagnose and get the correct port
+                REPAIR_PORT=$(diagnose_and_repair)
+                echo ""
+                
+                if [ -z "$REPAIR_PORT" ]; then
+                    log_error "Cannot determine port - no container running and no saved port"
+                    log_info "Run a full deployment instead: ./deploy.sh --domain YOUR_DOMAIN"
+                    exit 1
+                fi
+                
+                log_info "Repairing with port: $REPAIR_PORT"
+                
+                # Fix nginx config
+                create_nginx_config "$REPAIR_PORT"
+                
+                log_success "Repair complete!"
+                exit 0
+                ;;
             --help)
                 echo "Usage: ./deploy.sh [OPTIONS]"
                 echo ""
@@ -536,11 +680,26 @@ main() {
                 echo "  --force-port PORT    Use this exact port (skip auto-detection)"
                 echo "  --skip-ssl           Skip SSL configuration"
                 echo "  --skip-nginx         Skip Nginx configuration"
+                echo "  --diagnose           Check current deployment state without deploying"
+                echo "  --repair             Auto-fix port/nginx configuration issues"
                 echo "  --help               Show this help message"
                 echo ""
                 echo "Environment variables:"
-                echo "  DATABASE_URL       PostgreSQL connection string (required)"
-                echo "  SESSION_SECRET     Session encryption secret (auto-generated if not set)"
+                echo "  DATABASE_URL         PostgreSQL connection string (required)"
+                echo "  SESSION_SECRET       Session encryption secret (auto-generated if not set)"
+                echo ""
+                echo "Examples:"
+                echo "  # First deployment"
+                echo "  ./deploy.sh --domain olt.example.com --email admin@example.com"
+                echo ""
+                echo "  # Check deployment status"
+                echo "  ./deploy.sh --diagnose"
+                echo ""
+                echo "  # Fix 502 errors without full redeploy"
+                echo "  ./deploy.sh --repair"
+                echo ""
+                echo "  # Redeploy with specific port"
+                echo "  ./deploy.sh --domain olt.example.com --force-port 3005"
                 exit 0
                 ;;
             *)
@@ -560,16 +719,26 @@ main() {
         source .env.production
     fi
     
-    # Step 1: Determine port to use
+    # Step 1: Run diagnostics and determine port to use
+    echo ""
+    DETECTED_PORT=$(diagnose_and_repair)
+    echo ""
+    
     if [ -n "$FORCE_PORT" ]; then
         APP_PORT="$FORCE_PORT"
-        log_info "Using forced port: $APP_PORT" >&2
+        log_info "Using forced port: $APP_PORT"
+    elif [ -n "$DETECTED_PORT" ]; then
+        # Use port from existing setup (container > saved > nginx)
+        APP_PORT="$DETECTED_PORT"
+        log_info "Using detected port from existing setup: $APP_PORT"
     elif [ -n "$SAVED_APP_PORT" ]; then
-        # Reuse saved port from previous deployment if available
+        # Fallback to saved port from .env.production
         APP_PORT="$SAVED_APP_PORT"
-        log_info "Reusing saved port from .env.production: $APP_PORT" >&2
+        log_info "Using saved port from .env.production: $APP_PORT"
     else
+        # Find new available port
         APP_PORT=$(find_available_port)
+        log_info "Using newly assigned port: $APP_PORT"
     fi
     echo ""
     

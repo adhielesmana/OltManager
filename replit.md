@@ -228,15 +228,30 @@ shared/
 
 # Custom starting port
 ./deploy.sh --domain olt.yourdomain.com --port 8080
+
+# Force specific port (for multi-container servers)
+./deploy.sh --domain olt.yourdomain.com --force-port 3005
+```
+
+### Troubleshooting Commands
+```bash
+# Check deployment state and diagnose issues
+./deploy.sh --diagnose
+
+# Auto-fix 502 errors without full redeploy
+./deploy.sh --repair
 ```
 
 ### Deployment Features
 1. **Auto Port Detection** - Finds next available port if default is in use
-2. **Smart Nginx Setup** - Skips installation if already present, only creates config
-3. **Config Preservation** - Won't overwrite existing nginx config for this app
-4. **Auto SSL** - Configures Let's Encrypt with auto-renewal (skips if already configured)
-5. **Database Backup** - Automatic backup before every deployment (keeps last 7)
-6. **Docker Cleanup** - Removes unused containers, images, and cache older than 24h
+2. **Port Persistence** - Saves assigned port to .env.production for reuse
+3. **Diagnostics** - Detects port mismatches between nginx and Docker
+4. **Auto-Repair** - Fixes corrupted nginx configs automatically
+5. **Smart Nginx Setup** - Skips installation if already present, validates configs
+6. **Config Validation** - Detects ANSI corruption and recreates if needed
+7. **Auto SSL** - Configures Let's Encrypt with auto-renewal (skips if already configured)
+8. **Database Backup** - Automatic backup before every deployment (keeps last 7)
+9. **Docker Cleanup** - Removes unused containers, images, and cache older than 24h
 
 ### Environment Variables
 - `DATABASE_URL` - PostgreSQL connection string
