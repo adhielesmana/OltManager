@@ -638,15 +638,68 @@ main() {
                 shift
                 ;;
             --diagnose)
-                log_info "Diagnosing current deployment state..."
+                # Parse --domain if provided
+                shift
+                while [[ $# -gt 0 ]]; do
+                    case $1 in
+                        --domain) DOMAIN="$2"; shift 2 ;;
+                        *) shift ;;
+                    esac
+                done
+                
+                log_info "Diagnosing deployment for domain: ${DOMAIN}"
                 echo ""
-                # Run diagnostics - logs go to stderr (visible), port goes to stdout (captured)
-                DIAG_PORT=$(diagnose_and_repair)
-                echo ""
-                if [ -n "$DIAG_PORT" ]; then
-                    log_info "Recommended port: $DIAG_PORT"
+                
+                # Check Docker container
+                log_info "=== Docker Container ==="
+                CONTAINER_PORT=$(docker port "${CONTAINER_NAME}" 5000 2>/dev/null | sed 's/.*://' | head -1)
+                if [ -n "$CONTAINER_PORT" ]; then
+                    log_success "Container ${CONTAINER_NAME} running on port: $CONTAINER_PORT"
+                else
+                    log_warn "Container ${CONTAINER_NAME} is NOT running"
                 fi
-                log_info "Run with --repair to auto-fix issues, or run without flags to redeploy"
+                echo ""
+                
+                # Check our nginx config
+                log_info "=== Our Nginx Config ==="
+                if [ -f "${NGINX_CONF_DIR}/${APP_NAME}" ]; then
+                    log_info "Config file: ${NGINX_CONF_DIR}/${APP_NAME}"
+                    echo "---"
+                    cat "${NGINX_CONF_DIR}/${APP_NAME}"
+                    echo "---"
+                else
+                    log_warn "No config file found at ${NGINX_CONF_DIR}/${APP_NAME}"
+                fi
+                echo ""
+                
+                # Check ALL configs that mention this domain
+                log_info "=== All Nginx Configs Mentioning ${DOMAIN} ==="
+                DOMAIN_MATCHES=$(grep -rl "${DOMAIN}" /etc/nginx/sites-enabled/ 2>/dev/null || true)
+                if [ -n "$DOMAIN_MATCHES" ]; then
+                    echo "$DOMAIN_MATCHES" | while read -r conf; do
+                        log_warn "Found in: $conf"
+                    done
+                else
+                    log_warn "Domain ${DOMAIN} not found in any nginx config!"
+                fi
+                echo ""
+                
+                # Check for default/catch-all servers
+                log_info "=== All Enabled Nginx Sites ==="
+                ls -la /etc/nginx/sites-enabled/ 2>/dev/null || log_warn "No sites-enabled directory"
+                echo ""
+                
+                # Check default config
+                log_info "=== Default Site (may catch all domains) ==="
+                if [ -f "/etc/nginx/sites-enabled/default" ]; then
+                    log_warn "Default site exists - may be catching your domain!"
+                    grep -A2 "server_name" /etc/nginx/sites-enabled/default 2>/dev/null || true
+                else
+                    log_success "No default site (good)"
+                fi
+                echo ""
+                
+                log_info "Run './deploy.sh --repair --domain ${DOMAIN}' to fix nginx config"
                 exit 0
                 ;;
             --repair)
