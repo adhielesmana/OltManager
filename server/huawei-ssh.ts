@@ -867,40 +867,26 @@ export class HuaweiSSH {
       console.log(`[SSH] Unbinding ONU ${onuId} from port ${gponPort}, cleanConfig=${cleanConfig}`);
       console.log(`[SSH] Parsed port parts: frame=${frame}, slot=${slot}, port=${port}`);
 
-      const COMMAND_DELAY = 30000; // 30 seconds between commands
-
       // First quit any current interface mode to ensure we're in config mode
-      console.log("[SSH] Step 1: Exiting current mode...");
       await this.executeCommand("quit");
-      console.log("[SSH] Waiting 30s before next command...");
-      await new Promise(r => setTimeout(r, COMMAND_DELAY));
 
       // Enter GPON interface
-      console.log(`[SSH] Step 2: Entering interface gpon ${frame}/${slot}...`);
       const ifaceResult = await this.executeCommand(`interface gpon ${frame}/${slot}`);
-      console.log(`[SSH] Interface result: ${ifaceResult.substring(0, 100)}`);
-      console.log("[SSH] Waiting 30s before next command...");
-      await new Promise(r => setTimeout(r, COMMAND_DELAY));
+      console.log(`[SSH] Entered interface: ${ifaceResult.substring(0, 100)}`);
 
       // Delete the ONU
       const deleteCmd = "ont delete " + String(port) + " " + String(onuId);
-      console.log(`[SSH] Step 3: Executing delete command: "${deleteCmd}"`);
+      console.log(`[SSH] Executing: "${deleteCmd}"`);
       const deleteResult = await this.executeCommand(deleteCmd);
       console.log(`[SSH] Delete result: ${deleteResult.substring(0, 300)}`);
 
       // Check for errors
       if (deleteResult.includes("Failure") || deleteResult.includes("Unknown command")) {
-        console.log("[SSH] Waiting 30s before quit...");
-        await new Promise(r => setTimeout(r, COMMAND_DELAY));
         await this.executeCommand("quit");
         return { success: false, message: `Failed to unbind ONU: ${deleteResult}` };
       }
 
-      console.log("[SSH] Waiting 30s before exit...");
-      await new Promise(r => setTimeout(r, COMMAND_DELAY));
-
       // Exit interface
-      console.log("[SSH] Step 4: Exiting interface...");
       await this.executeCommand("quit");
 
       console.log(`[SSH] Successfully unbound ONU ${onuId} from ${gponPort}`);
