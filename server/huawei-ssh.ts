@@ -875,12 +875,12 @@ export class HuaweiSSH {
       // 5. Delete ONU
       // 6. Verify deletion
 
-      // Step 1: Exit any current mode and enter config/system-view
-      console.log(`[SSH] Step 1: Ensuring system-view mode...`);
+      // Step 1: Exit any current mode and enter enable mode
+      console.log(`[SSH] Step 1: Ensuring enable mode...`);
       await this.executeCommand("quit");
-      await this.executeCommand("config");
+      await this.executeCommand("enable");
       
-      // Step 2: Check ALL service ports from system-view, then filter for our ONU
+      // Step 2: Check ALL service ports, then filter for our ONU
       const spCmd = "display service-port all";
       console.log(`[SSH] Step 2: Checking all service ports with: ${spCmd}`);
       const spOutput = await this.executeCommand(spCmd);
