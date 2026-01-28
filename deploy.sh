@@ -112,18 +112,26 @@ create_nginx_config() {
     log_info "Checking Nginx configuration for ${APP_NAME}..."
     
     if [ -f "$config_file" ]; then
-        log_success "Nginx configuration already exists, skipping"
+        log_info "Nginx configuration already exists"
         
-        # Update port in existing config if different
-        if grep -q "proxy_pass http://127.0.0.1:${port}" "$config_file"; then
-            log_info "Port configuration is up to date"
+        # Validate existing config
+        if ! nginx -t 2>/dev/null; then
+            log_warn "Existing Nginx config is invalid, recreating..."
+            rm -f "$config_file" "${NGINX_ENABLED_DIR}/${APP_NAME}"
+            # Fall through to create new config
         else
-            log_warn "Updating port in existing configuration..."
-            sed -i "s|proxy_pass http://127.0.0.1:[0-9]*;|proxy_pass http://127.0.0.1:${port};|g" "$config_file"
-            nginx -t && systemctl reload nginx
-            log_success "Port updated in Nginx configuration"
+            # Update port in existing config if different
+            if grep -q "proxy_pass http://127.0.0.1:${port}" "$config_file"; then
+                log_info "Port configuration is up to date"
+            else
+                log_warn "Updating port in existing configuration..."
+                # Match any characters after the colon (not just numbers) to handle corrupted configs
+                sed -i "s|proxy_pass http://127.0.0.1:[^;]*;|proxy_pass http://127.0.0.1:${port};|g" "$config_file"
+                nginx -t && systemctl reload nginx
+                log_success "Port updated in Nginx configuration"
+            fi
+            return 0
         fi
-        return 0
     fi
     
     log_info "Creating Nginx configuration..."
