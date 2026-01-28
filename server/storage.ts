@@ -351,7 +351,13 @@ export class DatabaseStorage implements IStorage {
           await db.insert(oltDataRefresh).values({ oltCredentialId: id });
         }
         
-        return { success: true, message: "Connected to OLT successfully. Click Refresh to fetch data." };
+        // Auto-refresh data after successful connection
+        console.log("[Storage] Automatically loading all OLT information...");
+        this.refreshOltData().catch(err => {
+          console.error("[Storage] Auto-refresh failed:", err.message);
+        });
+
+        return { success: true, message: "Connected to OLT successfully. Fetching data in background..." };
       } else {
         await this.updateOltCredential(id, { isConnected: false });
         return result;
