@@ -121,17 +121,25 @@ export class HuaweiSSH {
             return;
           }
 
-          // Handle <cr>||<K> prompts (Huawei parameter completion prompts) - send Enter
-          if (this.shellBuffer.includes("<cr>||<K>") || this.shellBuffer.includes("{ <cr>")) {
+          // Handle <cr>||<K> prompts (Huawei parameter completion prompts) - send Enter once
+          // Check if this is a fresh prompt (ends with }:) and we haven't already sent Enter
+          if (this.shellBuffer.match(/\{\s*<cr>\|\|<K>\s*\}:\s*$/)) {
             stream.write("\n");
-            return;
+            // Don't return - let it continue to check for completion
           }
 
           // Check for command completion (prompt returned)
           // Huawei prompts look like: hostname# or hostname(config)# or hostname(config-if-gpon-0/1)#
+          // The prompt must be on its own line (not followed by command text or { <cr> prompts)
           if (this.currentResolve) {
-            const promptMatch = this.shellBuffer.match(/[\r\n][\w\-]+(\([^)]+\))?[#>]\s*$/);
-            if (promptMatch || this.shellBuffer.includes("end of configuration")) {
+            // Wait for a clean prompt line that's not followed by anything else
+            // The prompt should be at the very end after command output
+            const cleanPromptMatch = this.shellBuffer.match(/[\r\n]([\w\-]+(\([^)]+\))?[#>])\s*$/);
+            const hasHuaweiPrompt = this.shellBuffer.includes("<cr>||<K>");
+            
+            // Only complete if we have a clean prompt AND no pending Huawei prompts at the end
+            if ((cleanPromptMatch && !this.shellBuffer.match(/\{\s*<cr>\|\|<K>\s*\}:\s*$/)) || 
+                this.shellBuffer.includes("end of configuration")) {
               // Give a small delay to collect any remaining output
               if (this.commandTimeout) {
                 clearTimeout(this.commandTimeout);
@@ -144,7 +152,7 @@ export class HuaweiSSH {
                   this.isExecuting = false;
                   this.processQueue();
                 }
-              }, 500);
+              }, 800);
             }
           }
         });
@@ -159,19 +167,29 @@ export class HuaweiSSH {
         });
 
         // Wait for initial prompt, then enter enable and config mode
-        setTimeout(() => {
-          console.log("[SSH] Sending 'enable' command...");
-          stream.write("enable\n");
-          setTimeout(() => {
-            console.log("[SSH] Sending 'config' command...");
-            stream.write("config\n");
+        // Use longer delays to ensure each command completes
+        const waitForPrompt = (cmd: string, delay: number): Promise<void> => {
+          return new Promise((res) => {
             setTimeout(() => {
-              console.log("[SSH] Shell ready in config mode");
-              this.shellBuffer = "";
-              resolve();
-            }, 1500);
-          }, 1500);
-        }, 1500);
+              console.log(`[SSH] Sending '${cmd}' command...`);
+              stream.write(cmd + "\n");
+              setTimeout(() => {
+                this.shellBuffer = "";
+                res();
+              }, delay);
+            }, 500);
+          });
+        };
+
+        // Initial delay to wait for login banner
+        setTimeout(async () => {
+          await waitForPrompt("enable", 2000);
+          await waitForPrompt("config", 2000);
+          console.log("[SSH] Shell ready in config mode");
+          this.shellBuffer = "";
+          this.isExecuting = false;
+          resolve();
+        }, 2000);
       });
     });
   }
@@ -261,6 +279,40 @@ export class HuaweiSSH {
         uptime: "-",
         connected: this.connected,
       };
+    }
+  }
+
+  // Get all ONU data in a single interface session to avoid command interleaving
+  async getAllOnuData(): Promise<{ unbound: UnboundOnu[], bound: BoundOnu[] }> {
+    try {
+      // Enter GPON interface once
+      await this.executeCommand("interface gpon 0/1");
+      
+      // Get autofind (unbound) first
+      const autofindOutput = await this.executeCommand("display ont autofind 0");
+      const unbound = this.parseUnboundOnus(autofindOutput, "0/1/0");
+      
+      // Get bound ONUs
+      const boundOutput = await this.executeCommand("display ont info 0 all");
+      const bound = this.parseBoundOnus(boundOutput, "0/1/0");
+      
+      // Get optical info for bound ONUs if any
+      if (bound.length > 0) {
+        try {
+          const opticalOutput = await this.executeCommand("display ont optical-info 0 all");
+          this.enrichWithOpticalInfo(bound, opticalOutput);
+        } catch (err) {
+          console.log("[SSH] Could not get optical info");
+        }
+      }
+      
+      // Exit interface once
+      await this.executeCommand("quit");
+      
+      return { unbound, bound };
+    } catch (err) {
+      console.error("[SSH] Error getting ONU data:", err);
+      return { unbound: [], bound: [] };
     }
   }
 
@@ -380,50 +432,49 @@ export class HuaweiSSH {
     console.log("[SSH] Raw bound ONU output:", output.substring(0, 500));
 
     for (const line of lines) {
-      const trimmedLine = line.trim();
-      const parts = trimmedLine.split(/\s+/);
+      // Match lines like: "0/ 1/0     0 48575443072426B4  active      online   normal   match    no"
+      // The port may have spaces like "0/ 1/0" instead of "0/1/0"
+      const match = line.match(/^\s*(\d+)\s*\/\s*(\d+)\s*\/\s*(\d+)\s+(\d+)\s+([A-Fa-f0-9]{16})\s+(\w+)\s+(\w+)\s+(\w+)\s+(\w+)/);
       
-      // Look for lines starting with port format
-      if (parts.length >= 5 && /^\d+\/\d+\/\d+$/.test(parts[0])) {
-        const port = parts[0];
-        const onuId = parseInt(parts[1]);
-        const sn = parts[2];
+      if (match) {
+        const port = `${match[1]}/${match[2]}/${match[3]}`;
+        const onuId = parseInt(match[4]);
+        const sn = match[5];
+        const controlFlag = match[6];
+        const runState = match[7]?.toLowerCase() || "offline";
+        const configState = match[8]?.toLowerCase() || "normal";
         
-        // Validate
-        if (!isNaN(onuId) && sn && /^[A-Fa-f0-9]{16}$/.test(sn)) {
-          const runState = parts[4]?.toLowerCase() || "offline";
-          const configState = parts[5]?.toLowerCase() || "normal";
-          
-          let status: "online" | "offline" | "los" = "offline";
-          if (runState.includes("online")) {
-            status = "online";
-          } else if (runState.includes("los") || runState.includes("dying")) {
-            status = "los";
-          }
-
-          let configStatus: "normal" | "initial" | "failed" = "normal";
-          if (configState.includes("initial")) {
-            configStatus = "initial";
-          } else if (configState.includes("fail")) {
-            configStatus = "failed";
-          }
-
-          onus.push({
-            id: `${port}-${onuId}`,
-            serialNumber: sn.toUpperCase(),
-            gponPort: port,
-            onuId: onuId,
-            status: status,
-            configState: configStatus,
-            description: "",
-            lineProfileId: 1,
-            serviceProfileId: 1,
-            rxPower: undefined,
-            txPower: undefined,
-            distance: undefined,
-            boundAt: new Date().toISOString(),
-          });
+        console.log(`[SSH] Found ONU: port=${port}, id=${onuId}, sn=${sn}, run=${runState}, config=${configState}`);
+        
+        let status: "online" | "offline" | "los" = "offline";
+        if (runState.includes("online")) {
+          status = "online";
+        } else if (runState.includes("los") || runState.includes("dying")) {
+          status = "los";
         }
+
+        let configStatus: "normal" | "initial" | "failed" = "normal";
+        if (configState.includes("initial")) {
+          configStatus = "initial";
+        } else if (configState.includes("fail")) {
+          configStatus = "failed";
+        }
+
+        onus.push({
+          id: `${port}-${onuId}`,
+          serialNumber: sn.toUpperCase(),
+          gponPort: port,
+          onuId: onuId,
+          status: status,
+          configState: configStatus,
+          description: "",
+          lineProfileId: 1,
+          serviceProfileId: 1,
+          rxPower: undefined,
+          txPower: undefined,
+          distance: undefined,
+          boundAt: new Date().toISOString(),
+        });
       }
     }
 

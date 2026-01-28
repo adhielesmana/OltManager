@@ -300,15 +300,14 @@ export class DatabaseStorage implements IStorage {
     try {
       console.log("[Storage] Refreshing OLT data...");
       
-      // Fetch unbound ONUs
-      const unboundList = await huaweiSSH.getUnboundOnus();
-      this.unboundOnus.clear();
-      unboundList.forEach(onu => this.unboundOnus.set(onu.serialNumber, onu));
+      // Use combined method to get all ONU data in a single session
+      const { unbound, bound } = await huaweiSSH.getAllOnuData();
       
-      // Fetch bound ONUs
-      const boundList = await huaweiSSH.getBoundOnus();
+      this.unboundOnus.clear();
+      unbound.forEach(onu => this.unboundOnus.set(onu.serialNumber, onu));
+      
       this.boundOnus.clear();
-      boundList.forEach(onu => this.boundOnus.set(onu.serialNumber, onu));
+      bound.forEach(onu => this.boundOnus.set(onu.serialNumber, onu));
       
       // Fetch profiles
       this.lineProfiles = await huaweiSSH.getLineProfiles();

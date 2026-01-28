@@ -10,6 +10,9 @@ A professional network operations management application for Huawei MA5801 OLT d
 - Added OLT settings page for connection management
 - Removed mock data - shows empty states until OLT is connected
 - Protected all routes with authentication middleware
+- Fixed bound ONU parsing to handle Huawei spaced port format (0/ 1/0 → 0/1/0)
+- Improved SSH shell buffer handling for { <cr>||<K> } prompts
+- Added combined getAllOnuData() method to fetch all ONU data in single interface session
 
 ## Authentication System
 
