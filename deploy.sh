@@ -658,9 +658,28 @@ main() {
                     source .env.production
                 fi
                 
-                # Diagnose and get the correct port
-                REPAIR_PORT=$(diagnose_and_repair)
-                echo ""
+                # Get port directly without capturing log output
+                REPAIR_PORT=""
+                
+                # Priority 1: Running container port
+                REPAIR_PORT=$(get_container_port)
+                if [ -n "$REPAIR_PORT" ]; then
+                    log_info "Found running container on port: $REPAIR_PORT"
+                fi
+                
+                # Priority 2: Saved port from .env.production
+                if [ -z "$REPAIR_PORT" ] && [ -n "$SAVED_APP_PORT" ]; then
+                    REPAIR_PORT="$SAVED_APP_PORT"
+                    log_info "Using saved port from .env.production: $REPAIR_PORT"
+                fi
+                
+                # Priority 3: Port from nginx config
+                if [ -z "$REPAIR_PORT" ]; then
+                    REPAIR_PORT=$(get_nginx_config_port)
+                    if [ -n "$REPAIR_PORT" ]; then
+                        log_info "Using port from nginx config: $REPAIR_PORT"
+                    fi
+                fi
                 
                 if [ -z "$REPAIR_PORT" ]; then
                     log_error "Cannot determine port - no container running and no saved port"
@@ -668,7 +687,7 @@ main() {
                     exit 1
                 fi
                 
-                log_info "Repairing with port: $REPAIR_PORT"
+                log_info "Repairing nginx config with port: $REPAIR_PORT"
                 
                 # Fix nginx config
                 create_nginx_config "$REPAIR_PORT"
