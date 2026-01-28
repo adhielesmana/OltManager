@@ -24,6 +24,11 @@ declare global {
   }
 }
 
+// Health check endpoint (no auth required)
+function healthCheck(req: Request, res: Response) {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+}
+
 // Auth middleware
 async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const sessionId = req.headers["x-session-id"] as string;
@@ -65,6 +70,9 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  // ==================== HEALTH CHECK ====================
+  app.get("/api/health", healthCheck);
 
   // ==================== AUTH ROUTES ====================
   

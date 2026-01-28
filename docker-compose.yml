@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: huawei-olt-manager
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - SESSION_SECRET=${SESSION_SECRET}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - olt-network
+
+  db:
+    image: postgres:15-alpine
+    container_name: huawei-olt-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-oltmanager2024}
+      - POSTGRES_DB=oltmanager
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - olt-network
+
+networks:
+  olt-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

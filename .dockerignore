@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.gitignore
+*.md
+.env
+.env.*
+*.log
+.replit
+replit.nix
+attached_assets
+.upm
+.config
+.cache
