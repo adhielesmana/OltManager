@@ -337,6 +337,15 @@ deploy_application() {
         log_success "Saved SESSION_SECRET to .env.production"
     fi
     
+    # Save the port for reuse on subsequent deployments
+    if ! grep -q "^SAVED_APP_PORT=" .env.production 2>/dev/null; then
+        echo "SAVED_APP_PORT=${port}" >> .env.production
+        log_success "Saved app port ${port} to .env.production"
+    elif [ "$(grep '^SAVED_APP_PORT=' .env.production | cut -d= -f2)" != "${port}" ]; then
+        sed -i "s/^SAVED_APP_PORT=.*/SAVED_APP_PORT=${port}/" .env.production
+        log_success "Updated app port to ${port} in .env.production"
+    fi
+    
     # Run the new container
     log_info "Starting new container on port ${port}..."
     docker run -d \
@@ -505,6 +514,10 @@ main() {
                 BASE_PORT="$2"
                 shift 2
                 ;;
+            --force-port)
+                FORCE_PORT="$2"
+                shift 2
+                ;;
             --skip-ssl)
                 SKIP_SSL=true
                 shift
@@ -517,12 +530,13 @@ main() {
                 echo "Usage: ./deploy.sh [OPTIONS]"
                 echo ""
                 echo "Options:"
-                echo "  --domain DOMAIN    Set the domain name (default: olt.example.com)"
-                echo "  --email EMAIL      Email for Let's Encrypt (default: admin@example.com)"
-                echo "  --port PORT        Base port to start searching from (default: 3000)"
-                echo "  --skip-ssl         Skip SSL configuration"
-                echo "  --skip-nginx       Skip Nginx configuration"
-                echo "  --help             Show this help message"
+                echo "  --domain DOMAIN      Set the domain name (default: olt.example.com)"
+                echo "  --email EMAIL        Email for Let's Encrypt (default: admin@example.com)"
+                echo "  --port PORT          Base port to start searching from (default: 3000)"
+                echo "  --force-port PORT    Use this exact port (skip auto-detection)"
+                echo "  --skip-ssl           Skip SSL configuration"
+                echo "  --skip-nginx         Skip Nginx configuration"
+                echo "  --help               Show this help message"
                 echo ""
                 echo "Environment variables:"
                 echo "  DATABASE_URL       PostgreSQL connection string (required)"
@@ -546,8 +560,17 @@ main() {
         source .env.production
     fi
     
-    # Step 1: Find available port
-    APP_PORT=$(find_available_port)
+    # Step 1: Determine port to use
+    if [ -n "$FORCE_PORT" ]; then
+        APP_PORT="$FORCE_PORT"
+        log_info "Using forced port: $APP_PORT" >&2
+    elif [ -n "$SAVED_APP_PORT" ]; then
+        # Reuse saved port from previous deployment if available
+        APP_PORT="$SAVED_APP_PORT"
+        log_info "Reusing saved port from .env.production: $APP_PORT" >&2
+    else
+        APP_PORT=$(find_available_port)
+    fi
     echo ""
     
     # Step 2: Cleanup old Docker resources
