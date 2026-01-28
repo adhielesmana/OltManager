@@ -302,6 +302,12 @@ deploy_application() {
         create_dockerfile
     fi
     
+    # Create startup script with migrations
+    if [ ! -f "start.sh" ]; then
+        log_info "Creating startup script..."
+        create_startup_script
+    fi
+    
     # Build the image
     docker build -t "${DOCKER_IMAGE}" .
     log_success "Docker image built successfully"
@@ -350,7 +356,7 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
+# Install all dependencies (including dev for build)
 RUN npm ci
 
 # Copy source code
@@ -366,12 +372,20 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
+COPY drizzle.config.ts ./
 
-# Install production dependencies only
-RUN npm ci --only=production
+# Install production dependencies + drizzle-kit for migrations
+RUN npm ci --only=production && npm install drizzle-kit
 
 # Copy built application
 COPY --from=builder /app/dist ./dist
+
+# Copy shared schema for migrations
+COPY --from=builder /app/shared ./shared
+
+# Copy startup script
+COPY start.sh ./
+RUN chmod +x start.sh
 
 # Create data directory
 RUN mkdir -p /app/data
@@ -382,10 +396,59 @@ EXPOSE 5000
 # Set environment
 ENV NODE_ENV=production
 
-# Start the application
-CMD ["node", "dist/index.js"]
+# Start with migration script
+CMD ["./start.sh"]
 EOF
     log_success "Dockerfile created"
+}
+
+# ============================================================
+# Create startup script with migrations
+# ============================================================
+create_startup_script() {
+    cat > start.sh <<'EOF'
+#!/bin/sh
+set -e
+
+echo "============================================"
+echo "  Huawei OLT Manager - Starting..."
+echo "============================================"
+
+# Wait for database to be ready
+echo "[Startup] Waiting for database connection..."
+MAX_RETRIES=30
+RETRY_COUNT=0
+
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if node -e "
+        const { Pool } = require('pg');
+        const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+        pool.query('SELECT 1').then(() => { pool.end(); process.exit(0); }).catch(() => process.exit(1));
+    " 2>/dev/null; then
+        echo "[Startup] Database connected!"
+        break
+    fi
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    echo "[Startup] Waiting for database... ($RETRY_COUNT/$MAX_RETRIES)"
+    sleep 2
+done
+
+if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+    echo "[Startup] ERROR: Could not connect to database after $MAX_RETRIES attempts"
+    exit 1
+fi
+
+# Run database migrations
+echo "[Startup] Running database migrations..."
+npx drizzle-kit push --force || {
+    echo "[Startup] WARNING: Migration push failed, trying to continue..."
+}
+
+echo "[Startup] Starting application..."
+exec node dist/index.js
+EOF
+    chmod +x start.sh
+    log_success "Startup script created with database migration"
 }
 
 # ============================================================

@@ -5,7 +5,7 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
+# Install all dependencies (including dev for build)
 RUN npm ci
 
 # Copy source code
@@ -21,15 +21,23 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
+COPY drizzle.config.ts ./
 
-# Install production dependencies only
-RUN npm ci --omit=dev
+# Install production dependencies + drizzle-kit for migrations
+RUN npm ci --omit=dev && npm install drizzle-kit
 
 # Copy built application
 COPY --from=builder /app/dist ./dist
 
+# Copy shared schema for migrations
+COPY --from=builder /app/shared ./shared
+
 # Copy assets (Huawei logo, etc.)
 COPY --from=builder /app/client/src/assets ./client/src/assets
+
+# Copy startup script
+COPY start.sh ./
+RUN chmod +x start.sh
 
 # Create data directory
 RUN mkdir -p /app/data
@@ -44,5 +52,5 @@ ENV NODE_ENV=production
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:5000/api/health || exit 1
 
-# Start the application
-CMD ["node", "dist/index.cjs"]
+# Start with migration script
+CMD ["./start.sh"]
