@@ -768,6 +768,51 @@ export class HuaweiSSH {
     console.log(`[SSH] Parsed ${vlans.length} VLANs`);
     return vlans;
   }
+
+  async unbindOnu(onuId: number, gponPort: string, cleanConfig: boolean): Promise<{ success: boolean; message: string }> {
+    if (!this.isConnected()) {
+      return { success: false, message: "Not connected to OLT" };
+    }
+
+    try {
+      // Parse port - format is "0/1/0" -> frame=0, slot=1, port=0
+      const portParts = gponPort.split("/");
+      if (portParts.length !== 3) {
+        return { success: false, message: `Invalid port format: ${gponPort}` };
+      }
+      const [frame, slot, port] = portParts.map(p => parseInt(p));
+
+      console.log(`[SSH] Unbinding ONU ${onuId} from port ${gponPort}, cleanConfig=${cleanConfig}`);
+
+      // Enter GPON interface
+      await this.executeCommand(`interface gpon ${frame}/${slot}`);
+
+      // Delete the ONU
+      const deleteResult = await this.executeCommand(`ont delete ${port} ${onuId}`);
+      console.log(`[SSH] Delete result: ${deleteResult.substring(0, 300)}`);
+
+      // Check for errors
+      if (deleteResult.includes("Failure") || deleteResult.includes("Error")) {
+        await this.executeCommand("quit");
+        return { success: false, message: `Failed to unbind ONU: ${deleteResult}` };
+      }
+
+      // Exit interface
+      await this.executeCommand("quit");
+
+      console.log(`[SSH] Successfully unbound ONU ${onuId} from ${gponPort}`);
+      return { success: true, message: `ONU ${onuId} unbound successfully` };
+    } catch (error: any) {
+      console.error("[SSH] Error unbinding ONU:", error);
+      // Try to exit interface on error
+      try {
+        await this.executeCommand("quit");
+      } catch (e) {
+        // Ignore quit error
+      }
+      return { success: false, message: `Unbind failed: ${error.message}` };
+    }
+  }
 }
 
 // Singleton instance

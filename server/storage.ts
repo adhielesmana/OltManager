@@ -971,9 +971,13 @@ export class DatabaseStorage implements IStorage {
       throw new Error("ONU not found");
     }
     
-    // TODO: Execute SSH commands to unbind ONU on OLT device
+    // Execute SSH commands to unbind ONU on OLT device
+    const result = await huaweiSSH.unbindOnu(onuId, gponPort, cleanConfig);
+    if (!result.success) {
+      throw new Error(result.message);
+    }
     
-    // Remove from bound list
+    // Remove from bound list in database
     await db.delete(boundOnus)
       .where(and(
         eq(boundOnus.oltCredentialId, credential.id),
@@ -981,17 +985,8 @@ export class DatabaseStorage implements IStorage {
         eq(boundOnus.gponPort, gponPort)
       ));
     
-    if (!cleanConfig) {
-      // Add to unbound list
-      await db.insert(unboundOnus).values({
-        serialNumber: onu.serialNumber,
-        gponPort: onu.gponPort,
-        discoveredAt: new Date(),
-        equipmentId: null,
-        softwareVersion: null,
-        oltCredentialId: credential.id,
-      });
-    }
+    // Note: The ONU should appear in autofind on the OLT automatically
+    // We'll pick it up on the next unbound refresh
   }
 }
 
