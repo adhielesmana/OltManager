@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -72,8 +72,8 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
   const form = useForm<BindOnuRequest>({
     resolver: zodResolver(bindOnuRequestSchema),
     defaultValues: {
-      serialNumber: selectedOnu?.serialNumber || "",
-      gponPort: selectedOnu?.gponPort || "0/1/0",
+      serialNumber: "",
+      gponPort: "0/1/0",
       lineProfileId: 0,
       serviceProfileId: 0,
       description: "",
@@ -82,6 +82,37 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
       pppoePassword: "",
     },
   });
+
+  // Reset form when dialog opens with selected ONU
+  useEffect(() => {
+    if (open && selectedOnu) {
+      form.reset({
+        serialNumber: selectedOnu.serialNumber || "",
+        gponPort: selectedOnu.gponPort || "0/1/0",
+        lineProfileId: 0,
+        serviceProfileId: 0,
+        description: "",
+        vlanId: undefined,
+        pppoeUsername: "",
+        pppoePassword: "",
+      });
+      setSelectedPort(selectedOnu.gponPort || "0/1/0");
+      setValidationStatus("idle");
+    } else if (open && !selectedOnu) {
+      form.reset({
+        serialNumber: "",
+        gponPort: "0/1/0",
+        lineProfileId: 0,
+        serviceProfileId: 0,
+        description: "",
+        vlanId: undefined,
+        pppoeUsername: "",
+        pppoePassword: "",
+      });
+      setSelectedPort("0/1/0");
+      setValidationStatus("idle");
+    }
+  }, [open, selectedOnu, form]);
 
   const bindMutation = useMutation({
     mutationFn: async (data: BindOnuRequest) => {
