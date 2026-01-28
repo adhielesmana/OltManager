@@ -873,8 +873,9 @@ export class HuaweiSSH {
       // Enter config mode
       await this.executeCommand("config");
       
-      // Step 1: Display ONT info to verify it exists
-      console.log(`[SSH] Step 1: Checking ONU exists...`);
+      // Step 1: Enter GPON interface first
+      console.log(`[SSH] Step 1: Entering interface gpon ${frame}/${slot}...`);
+      await this.executeCommand(`interface gpon ${frame}/${slot}`);
       
       // Step 2: Find service ports for this ONU
       console.log(`[SSH] Step 2: Checking for service ports on ${frame}/${slot} ONU ${onuId}...`);
@@ -910,14 +911,9 @@ export class HuaweiSSH {
         console.log(`[SSH] No service ports found for this ONU`);
       }
 
-      // Step 4: Enter GPON interface
-      console.log(`[SSH] Step 4: Entering interface gpon ${frame}/${slot}...`);
-      const ifaceResult = await this.executeCommand(`interface gpon ${frame}/${slot}`);
-      console.log(`[SSH] Entered interface: ${ifaceResult.substring(0, 100)}`);
-
-      // Step 5: Delete the ONU
+      // Step 4: Delete the ONU (already in interface gpon)
       const deleteCmd = "ont delete " + String(port) + " " + String(onuId);
-      console.log(`[SSH] Step 5: Executing: "${deleteCmd}"`);
+      console.log(`[SSH] Step 4: Executing: "${deleteCmd}"`);
       const deleteResult = await this.executeCommand(deleteCmd);
       console.log(`[SSH] Delete result: ${deleteResult.substring(0, 300)}`);
 
@@ -935,8 +931,8 @@ export class HuaweiSSH {
       // Exit interface
       await this.executeCommand("quit");
       
-      // Step 6: Verify deletion
-      console.log(`[SSH] Step 6: Verifying deletion...`);
+      // Step 5: Verify deletion
+      console.log(`[SSH] Step 5: Verifying deletion...`);
       await this.executeCommand(`interface gpon ${frame}/${slot}`);
       const verifyResult = await this.executeCommand(`display ont info ${port} ${onuId}`);
       await this.executeCommand("quit");
