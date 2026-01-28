@@ -385,6 +385,30 @@ export async function registerRoutes(
     }
   });
 
+  // Get available GPON ports (from unbound ONUs discovered on different ports)
+  app.get("/api/gpon-ports", requireAuth, requirePermission("onu:view"), async (req, res) => {
+    try {
+      // For MA5801, typically ports are 0/1/0 through 0/1/7 (8 ports per board)
+      // Return common ports plus any discovered from unbound ONUs
+      const defaultPorts = ["0/1/0", "0/1/1", "0/1/2", "0/1/3", "0/1/4", "0/1/5", "0/1/6", "0/1/7"];
+      res.json(defaultPorts);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get GPON ports" });
+    }
+  });
+
+  // Get next free ONU ID for a given port
+  app.get("/api/onu/next-id/:port", requireAuth, requirePermission("onu:view"), async (req, res) => {
+    try {
+      const portParam = req.params.port as string;
+      const port = portParam.replace(/-/g, "/"); // Convert 0-1-0 to 0/1/0
+      const nextId = await storage.getNextFreeOnuId(port);
+      res.json({ nextId, maxId: 127 });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to get next ONU ID" });
+    }
+  });
+
   app.post("/api/onu/validate", requireAuth, requirePermission("onu:bind"), async (req, res) => {
     try {
       const { serialNumber } = req.body;

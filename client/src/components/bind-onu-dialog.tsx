@@ -58,11 +58,22 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
     queryKey: ["/api/vlans"],
   });
 
+  const { data: gponPorts = [] } = useQuery<string[]>({
+    queryKey: ["/api/gpon-ports"],
+  });
+
+  const [selectedPort, setSelectedPort] = useState(selectedOnu?.gponPort || "0/1/0");
+
+  const { data: nextOnuIdData } = useQuery<{ nextId: number; maxId: number }>({
+    queryKey: ["/api/onu/next-id", selectedPort.replace(/\//g, "-")],
+    enabled: !!selectedPort,
+  });
+
   const form = useForm<BindOnuRequest>({
     resolver: zodResolver(bindOnuRequestSchema),
     defaultValues: {
       serialNumber: selectedOnu?.serialNumber || "",
-      gponPort: selectedOnu?.gponPort || "",
+      gponPort: selectedOnu?.gponPort || "0/1/0",
       lineProfileId: 0,
       serviceProfileId: 0,
       description: "",
@@ -214,15 +225,29 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>GPON Port</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="0/1/0"
-                        className="font-mono"
-                        {...field}
-                        data-testid="input-gpon-port"
-                      />
-                    </FormControl>
-                    <FormDescription>Frame/Slot/Port</FormDescription>
+                    <Select
+                      onValueChange={(v) => {
+                        field.onChange(v);
+                        setSelectedPort(v);
+                      }}
+                      value={field.value || "0/1/0"}
+                    >
+                      <FormControl>
+                        <SelectTrigger data-testid="select-gpon-port" className="font-mono">
+                          <SelectValue placeholder="Select port" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {gponPorts.map((port) => (
+                          <SelectItem key={port} value={port} className="font-mono">
+                            {port}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Next ONU ID: <span className="font-mono font-semibold">{nextOnuIdData?.nextId ?? "-"}</span> (max 127)
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
