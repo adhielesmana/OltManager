@@ -867,9 +867,12 @@ export class HuaweiSSH {
       console.log(`[SSH] Unbinding ONU ${onuId} from port ${gponPort}, cleanConfig=${cleanConfig}`);
       console.log(`[SSH] Parsed port parts: frame=${frame}, slot=${slot}, port=${port}`);
 
-      // First quit any current interface mode to ensure we're in config mode
+      // First quit any current interface mode
       await this.executeCommand("quit");
-
+      
+      // Enter config mode
+      await this.executeCommand("config");
+      
       // Enter GPON interface
       const ifaceResult = await this.executeCommand(`interface gpon ${frame}/${slot}`);
       console.log(`[SSH] Entered interface: ${ifaceResult.substring(0, 100)}`);
