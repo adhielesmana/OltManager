@@ -876,13 +876,30 @@ export class DatabaseStorage implements IStorage {
     const credential = await this.getActiveOltCredential();
     if (!credential) throw new Error("No active OLT connection");
     
+    // Get used IDs from database
     const boundOnPort = await db.select().from(boundOnus)
       .where(and(eq(boundOnus.oltCredentialId, credential.id), eq(boundOnus.gponPort, gponPort)));
+    const dbUsedIds = boundOnPort.map(onu => onu.onuId);
+    console.log(`[Storage] Database has ONU IDs on port ${gponPort}: [${dbUsedIds.join(", ")}]`);
     
-    const usedIds = boundOnPort.map(onu => onu.onuId);
+    // ALSO get used IDs directly from OLT to avoid conflicts with existing ONUs
+    let oltUsedIds: number[] = [];
+    if (huaweiSSH.isConnected()) {
+      try {
+        oltUsedIds = await huaweiSSH.getUsedOnuIds(gponPort);
+        console.log(`[Storage] OLT has ONU IDs on port ${gponPort}: [${oltUsedIds.join(", ")}]`);
+      } catch (err) {
+        console.log(`[Storage] Could not query OLT for used IDs, using database only:`, err);
+      }
+    }
+    
+    // Combine both lists (use Array.from to avoid downlevelIteration issue)
+    const allUsedIds = Array.from(new Set([...dbUsedIds, ...oltUsedIds]));
+    console.log(`[Storage] All used ONU IDs on port ${gponPort}: [${allUsedIds.join(", ")}]`);
     
     for (let i = 0; i <= 127; i++) {
-      if (!usedIds.includes(i)) {
+      if (!allUsedIds.includes(i)) {
+        console.log(`[Storage] Next free ONU ID on port ${gponPort}: ${i}`);
         return i;
       }
     }

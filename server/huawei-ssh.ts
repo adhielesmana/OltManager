@@ -605,6 +605,52 @@ export class HuaweiSSH {
     }
   }
 
+  // Get list of used ONU IDs on a specific GPON port directly from the OLT
+  async getUsedOnuIds(gponPort: string): Promise<number[]> {
+    const usedIds: number[] = [];
+    try {
+      // Parse port - format is "0/1/0" -> frame=0, slot=1, port=0
+      const portParts = gponPort.split("/");
+      if (portParts.length !== 3) {
+        console.log(`[SSH] Invalid port format for getUsedOnuIds: ${gponPort}`);
+        return [];
+      }
+      const [frame, slot, port] = portParts.map(p => parseInt(p));
+
+      // Enter GPON interface
+      await this.executeCommand(`interface gpon ${frame}/${slot}`);
+      
+      // Get bound ONUs on this port
+      const output = await this.executeCommand(`display ont info ${port} all`);
+      console.log(`[SSH] Checking used ONU IDs on port ${gponPort}:`, output.substring(0, 300));
+      
+      // Parse for ONU IDs - format: "0     0 48575443072426B4  active ..."
+      // We're looking for lines where the first column is the port (matching our port) and second is ONU ID
+      for (const line of output.split("\n")) {
+        // Match ONU ID from lines like: "    0 48575443072426B4  active      online"
+        // When inside interface gpon X/Y, the "display ont info P all" shows just Port and ONU-ID
+        const match = line.match(/^\s*(\d+)\s+([A-Fa-f0-9]{16})\s+/);
+        if (match) {
+          const onuId = parseInt(match[1]);
+          usedIds.push(onuId);
+          console.log(`[SSH] Found used ONU ID ${onuId} on port ${gponPort}`);
+        }
+      }
+      
+      // Exit interface
+      await this.executeCommand("quit");
+      
+      console.log(`[SSH] Total used ONU IDs on port ${gponPort}: [${usedIds.join(", ")}]`);
+      return usedIds;
+    } catch (err) {
+      console.error(`[SSH] Error getting used ONU IDs for port ${gponPort}:`, err);
+      try {
+        await this.executeCommand("quit");
+      } catch (e) {}
+      return usedIds;
+    }
+  }
+
   private parseBoundOnus(output: string, defaultPort: string = "0/0/0"): BoundOnu[] {
     const onus: BoundOnu[] = [];
     const lines = output.split("\n");
