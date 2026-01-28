@@ -1012,8 +1012,24 @@ export class HuaweiSSH {
         console.log(`[SSH] Port route result: ${portRouteResult.substring(0, 100)}`);
       }
 
-      // Exit interface
+      // Exit GPON interface first
       await this.executeCommand("quit");
+
+      // Step 9: Create service-port to map VLAN (CRITICAL for VLAN passthrough)
+      // This is required for both PPPoE and bridge mode
+      // Format: service-port vlan [VLAN] gpon [F/S/P] ont [ONU_ID] gemport 0 multi-service user-vlan [VLAN] tag-transform translate
+      console.log(`[SSH] Step 9: Creating service-port for VLAN ${vlanId}...`);
+      const servicePortCmd = "service-port vlan " + String(vlanId) + 
+        " gpon " + gponPort + 
+        " ont " + String(onuId) + 
+        " gemport 0 multi-service user-vlan " + String(vlanId) + 
+        " tag-transform translate";
+      const servicePortResult = await this.executeCommand(servicePortCmd);
+      console.log(`[SSH] Service-port result: ${servicePortResult.substring(0, 200)}`);
+
+      if (servicePortResult.includes("Failure") || servicePortResult.includes("Error")) {
+        console.warn(`[SSH] Warning: Service-port creation may have failed: ${servicePortResult.substring(0, 200)}`);
+      }
 
       console.log(`[SSH] Successfully bound ONU ${serialNumber} as ID ${onuId} on ${gponPort}`);
       return { success: true, message: `ONU bound successfully as ID ${onuId}` };
