@@ -873,16 +873,14 @@ export class HuaweiSSH {
       // Enter config mode
       await this.executeCommand("config");
       
-      // Step 1: Enter GPON interface first
-      console.log(`[SSH] Step 1: Entering interface gpon ${frame}/${slot}...`);
-      await this.executeCommand(`interface gpon ${frame}/${slot}`);
-      
-      // Step 2: Find service ports for this ONU
-      console.log(`[SSH] Step 2: Checking for service ports on ${frame}/${slot} ONU ${onuId}...`);
-      const spOutput = await this.executeCommand(`display service-port ont ${frame}/${slot} ${onuId}`);
+      // Step 1: Find service ports for this ONU (from config mode)
+      console.log(`[SSH] Step 1: Checking for service ports on ${frame}/${slot}/${port} ONU ${onuId}...`);
+      const spCmd = "display service-port ont " + frame + "/" + slot + "/" + port + " " + onuId;
+      console.log(`[SSH] Executing: ${spCmd}`);
+      const spOutput = await this.executeCommand(spCmd);
       console.log(`[SSH] Service port output: ${spOutput.substring(0, 300)}`);
       
-      // Step 3: Parse and delete any service ports found
+      // Step 2: Parse and delete any service ports found (still in config mode)
       // Format: INDEX  VLAN  VLAN ATTR  PORT TYPE  F/S/P  ...
       const lines = spOutput.split('\n');
       const servicePortIds: number[] = [];
@@ -911,7 +909,11 @@ export class HuaweiSSH {
         console.log(`[SSH] No service ports found for this ONU`);
       }
 
-      // Step 4: Delete the ONU (already in interface gpon)
+      // Step 3: Enter GPON interface
+      console.log(`[SSH] Step 3: Entering interface gpon ${frame}/${slot}...`);
+      await this.executeCommand(`interface gpon ${frame}/${slot}`);
+      
+      // Step 4: Delete the ONU
       const deleteCmd = "ont delete " + String(port) + " " + String(onuId);
       console.log(`[SSH] Step 4: Executing: "${deleteCmd}"`);
       const deleteResult = await this.executeCommand(deleteCmd);
