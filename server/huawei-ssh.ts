@@ -399,16 +399,22 @@ export class HuaweiSSH {
   }
 
   async getUnboundOnus(): Promise<UnboundOnu[]> {
+    let output = "";
     try {
       // Enter GPON interface first
       await this.executeCommand("interface gpon 0/1");
-      const output = await this.executeCommand("display ont autofind 0");
-      // Exit interface
-      await this.executeCommand("quit");
+      output = await this.executeCommand("display ont autofind 0");
       return this.parseUnboundOnus(output, "0/1/0");
     } catch (err) {
       console.error("[SSH] Error getting unbound ONUs:", err);
       return [];
+    } finally {
+      // Always exit interface back to config mode
+      try {
+        await this.executeCommand("quit");
+      } catch (e) {
+        console.log("[SSH] Error during quit:", e);
+      }
     }
   }
 
@@ -481,11 +487,12 @@ export class HuaweiSSH {
   }
 
   async getBoundOnus(): Promise<BoundOnu[]> {
+    let onus: BoundOnu[] = [];
     try {
       // Enter GPON interface first
       await this.executeCommand("interface gpon 0/1");
       const output = await this.executeCommand("display ont info 0 all");
-      const onus = this.parseBoundOnus(output, "0/1/0");
+      onus = this.parseBoundOnus(output, "0/1/0");
       
       // Get optical info for status if we have bound ONUs
       if (onus.length > 0) {
@@ -507,12 +514,17 @@ export class HuaweiSSH {
         }
       }
       
-      // Exit interface
-      await this.executeCommand("quit");
       return onus;
     } catch (err) {
       console.error("[SSH] Error getting bound ONUs:", err);
       return [];
+    } finally {
+      // Always exit interface back to config mode
+      try {
+        await this.executeCommand("quit");
+      } catch (e) {
+        console.log("[SSH] Error during quit:", e);
+      }
     }
   }
 
