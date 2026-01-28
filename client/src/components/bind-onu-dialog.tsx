@@ -78,6 +78,8 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
       serviceProfileId: 0,
       description: "",
       vlanId: undefined,
+      pppoeUsername: "",
+      pppoePassword: "",
     },
   });
 
@@ -350,6 +352,43 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
                         className="resize-none"
                         {...field}
                         data-testid="input-description"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="pppoeUsername"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>PPPoE Username (Optional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="user@isp.com"
+                        {...field}
+                        data-testid="input-pppoe-username"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="pppoePassword"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>PPPoE Password (Optional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="password"
+                        placeholder="********"
+                        {...field}
+                        data-testid="input-pppoe-password"
                       />
                     </FormControl>
                     <FormMessage />

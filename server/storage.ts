@@ -921,7 +921,24 @@ export class DatabaseStorage implements IStorage {
     const onuId = await this.getNextFreeOnuId(request.gponPort);
     const vlanId = request.vlanId || 200;
     
-    // TODO: Execute SSH commands to bind ONU on OLT device
+    // Execute SSH commands to bind ONU on OLT device
+    if (huaweiSSH.isConnected()) {
+      const bindResult = await huaweiSSH.bindOnu({
+        serialNumber: sn,
+        gponPort: request.gponPort,
+        onuId,
+        lineProfileName: lineProfile.name,
+        serviceProfileName: serviceProfile.name,
+        description: request.description,
+        vlanId,
+        pppoeUsername: request.pppoeUsername,
+        pppoePassword: request.pppoePassword,
+      });
+      
+      if (!bindResult.success) {
+        throw new Error(bindResult.message);
+      }
+    }
     
     // Insert into database
     const [newBoundOnu] = await db.insert(boundOnus).values({

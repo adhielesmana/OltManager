@@ -844,6 +844,102 @@ export class HuaweiSSH {
     return vlans;
   }
 
+  async bindOnu(params: {
+    serialNumber: string;
+    gponPort: string;
+    onuId: number;
+    lineProfileName: string;
+    serviceProfileName: string;
+    description: string;
+    vlanId: number;
+    pppoeUsername?: string;
+    pppoePassword?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    if (!this.isConnected()) {
+      return { success: false, message: "Not connected to OLT" };
+    }
+
+    // Wait for cooldown from any previous operation
+    await this.waitForCooldown("Bind");
+
+    // Create operation lock
+    let releaseLock: () => void;
+    this.operationLock = new Promise<void>(resolve => { releaseLock = resolve; });
+
+    try {
+      const { serialNumber, gponPort, onuId, lineProfileName, serviceProfileName, description, vlanId, pppoeUsername, pppoePassword } = params;
+      
+      // Parse port - format is "0/1/0" -> frame=0, slot=1, port=0
+      const portParts = gponPort.split("/");
+      if (portParts.length !== 3) {
+        return { success: false, message: `Invalid port format: ${gponPort}` };
+      }
+      const [frame, slot, port] = portParts.map(p => parseInt(p));
+
+      console.log(`[SSH] Binding ONU ${serialNumber} to port ${gponPort} as ONU ID ${onuId}`);
+      console.log(`[SSH] Profiles: line=${lineProfileName}, service=${serviceProfileName}, vlan=${vlanId}`);
+
+      // Step 1: Enter config mode
+      console.log(`[SSH] Step 1: Entering config mode...`);
+      await this.executeCommand("quit");
+      await this.executeCommand("config");
+
+      // Step 2: Enter GPON interface
+      console.log(`[SSH] Step 2: Entering interface gpon ${frame}/${slot}...`);
+      await this.executeCommand("interface gpon " + String(frame) + "/" + String(slot));
+
+      // Step 3: Add the ONT
+      // Format: ont add PORT ONU_ID sn-auth SERIAL omci ont-lineprofile-name NAME ont-srvprofile-name NAME desc "DESC"
+      const addCmd = "ont add " + String(port) + " " + String(onuId) + 
+        " sn-auth " + serialNumber + 
+        " omci ont-lineprofile-name " + lineProfileName + 
+        " ont-srvprofile-name " + serviceProfileName + 
+        " desc " + description.replace(/\s+/g, "_").substring(0, 32);
+      
+      console.log(`[SSH] Step 3: Adding ONU with: ${addCmd}`);
+      const addResult = await this.executeCommand(addCmd);
+      console.log(`[SSH] Add result: ${addResult}`);
+
+      if (addResult.includes("Failure") || addResult.includes("Error") || addResult.includes("Unknown command")) {
+        await this.executeCommand("quit");
+        return { success: false, message: `Failed to add ONU: ${addResult.substring(0, 200)}` };
+      }
+
+      // Step 4: Configure PPPoE if username and password provided
+      if (pppoeUsername && pppoePassword) {
+        console.log(`[SSH] Step 4: Configuring PPPoE for user ${pppoeUsername}...`);
+        
+        // ont ipconfig [port] [onu-id] pppoe vlan [vlan] priority 5 user-account username [user] password [pass]
+        const pppoeCmd = "ont ipconfig " + String(port) + " " + String(onuId) + 
+          " pppoe vlan " + String(vlanId) + 
+          " priority 5 user-account username " + pppoeUsername + 
+          " password " + pppoePassword;
+        
+        console.log(`[SSH] Executing PPPoE config: ont ipconfig ${port} ${onuId} pppoe vlan ${vlanId} priority 5 user-account username ${pppoeUsername} password ****`);
+        const pppoeResult = await this.executeCommand(pppoeCmd);
+        console.log(`[SSH] PPPoE result: ${pppoeResult}`);
+
+        if (pppoeResult.includes("Failure") || pppoeResult.includes("Error")) {
+          console.log(`[SSH] Warning: PPPoE configuration may have failed, but ONU was bound successfully`);
+        }
+      }
+
+      // Exit interface
+      await this.executeCommand("quit");
+
+      console.log(`[SSH] Successfully bound ONU ${serialNumber} as ID ${onuId} on ${gponPort}`);
+      return { success: true, message: `ONU bound successfully as ID ${onuId}` };
+
+    } catch (error) {
+      console.error("[SSH] Error binding ONU:", error);
+      return { success: false, message: error instanceof Error ? error.message : "Unknown error" };
+    } finally {
+      // Mark operation complete and start cooldown
+      this.markOperationComplete();
+      releaseLock!();
+    }
+  }
+
   async unbindOnu(onuId: number, gponPort: string, cleanConfig: boolean): Promise<{ success: boolean; message: string }> {
     if (!this.isConnected()) {
       return { success: false, message: "Not connected to OLT" };

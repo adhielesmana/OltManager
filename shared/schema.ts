@@ -311,6 +311,8 @@ export const bindOnuRequestSchema = z.object({
   serviceProfileId: z.number().min(1, "Service profile is required"),
   description: z.string().min(1, "Description is required"),
   vlanId: z.number().optional(),
+  pppoeUsername: z.string().optional(),
+  pppoePassword: z.string().optional(),
 });
 export type BindOnuRequest = z.infer<typeof bindOnuRequestSchema>;
 
