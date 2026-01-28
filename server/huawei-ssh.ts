@@ -283,9 +283,16 @@ export class HuaweiSSH {
       }
     }, 15000);
 
-    // Send command
+    // Always disable pagination before each command to ensure full output
     console.log(`[SSH] Executing: ${command}`);
-    this.shell.write(command + "\n");
+    this.shell.write("screen-length 0 temporary\n");
+    
+    // Small delay then send actual command
+    setTimeout(() => {
+      if (this.shell) {
+        this.shell.write(command + "\n");
+      }
+    }, 100);
   }
 
   async getOltInfo(): Promise<OltInfo> {
