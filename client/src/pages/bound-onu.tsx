@@ -139,16 +139,6 @@ export default function BoundOnuPage() {
             )}
           </div>
           <Button
-            variant="default"
-            size="sm"
-            onClick={() => refreshMutation.mutate()}
-            disabled={refreshMutation.isPending || refreshStatus?.inProgress}
-            data-testid="button-sync-olt"
-          >
-            <Download className={`h-4 w-4 mr-2 ${refreshMutation.isPending || refreshStatus?.inProgress ? "animate-pulse" : ""}`} />
-            {refreshMutation.isPending || refreshStatus?.inProgress ? "Syncing..." : "Sync from OLT"}
-          </Button>
-          <Button
             variant="outline"
             size="sm"
             onClick={() => refetch()}

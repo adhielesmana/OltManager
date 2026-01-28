@@ -84,11 +84,43 @@ export interface IStorage {
 export class DatabaseStorage implements IStorage {
   // Lock to prevent concurrent OLT data refresh operations
   private refreshLock: Promise<void> | null = null;
+  private autoSyncInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     console.log("[Storage] Database storage initialized - data served from database");
     // Auto-reconnect to active OLT after startup
     setTimeout(() => this.autoReconnectOlt(), 2000);
+    // Start auto-sync every 5 minutes
+    this.startAutoSync();
+  }
+
+  private startAutoSync(): void {
+    // Clear any existing interval
+    if (this.autoSyncInterval) {
+      clearInterval(this.autoSyncInterval);
+    }
+    
+    // Auto-sync every 5 minutes (300000 ms)
+    const SYNC_INTERVAL = 5 * 60 * 1000;
+    console.log("[Storage] Auto-sync enabled: refreshing OLT data every 5 minutes");
+    
+    this.autoSyncInterval = setInterval(async () => {
+      try {
+        if (huaweiSSH.isConnected()) {
+          console.log("[Storage] Auto-sync: Starting scheduled OLT data refresh...");
+          const result = await this.refreshOltData();
+          if (result.success) {
+            console.log("[Storage] Auto-sync: Completed successfully");
+          } else {
+            console.log(`[Storage] Auto-sync: Failed - ${result.message}`);
+          }
+        } else {
+          console.log("[Storage] Auto-sync: Skipped - OLT not connected");
+        }
+      } catch (error: any) {
+        console.error("[Storage] Auto-sync error:", error.message);
+      }
+    }, SYNC_INTERVAL);
   }
 
   private async autoReconnectOlt(): Promise<void> {
