@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, Network, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
+import huaweiLogo from "@/assets/huawei-logo.png";
 
 export default function LoginPage() {
   const [, setLocation] = useLocation();
@@ -36,11 +37,9 @@ export default function LoginPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1 text-center">
           <div className="flex justify-center mb-4">
-            <div className="p-3 rounded-full bg-primary/10">
-              <Network className="h-8 w-8 text-primary" />
-            </div>
+            <img src={huaweiLogo} alt="Huawei" className="h-16 w-auto" />
           </div>
-          <CardTitle className="text-2xl font-bold">Huawei OLT Manager</CardTitle>
+          <CardTitle className="text-2xl font-bold">OLT Manager</CardTitle>
           <CardDescription>
             Sign in to manage your GPON network
           </CardDescription>

@@ -12,7 +12,6 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import {
-  Radio,
   Link2,
   Link2Off,
   Settings,
@@ -25,6 +24,7 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
+import huaweiLogo from "@/assets/huawei-logo.png";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
@@ -95,11 +95,9 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="p-4 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Radio className="h-5 w-5" />
-          </div>
+          <img src={huaweiLogo} alt="Huawei" className="h-10 w-auto" />
           <div className="flex flex-col">
-            <span className="font-semibold text-sm">Huawei OLT Manager</span>
+            <span className="font-semibold text-sm">OLT Manager</span>
             <span className="text-xs text-muted-foreground">MA5801 Series</span>
           </div>
         </div>
