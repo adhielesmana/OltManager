@@ -205,6 +205,10 @@ export class HuaweiSSH {
         setTimeout(async () => {
           await waitForPrompt("enable", 2000);
           
+          // Disable pagination for the session - best for automation
+          console.log("[SSH] Disabling screen-length pagination...");
+          await waitForPrompt("screen-length 0 temporary", 1000);
+          
           // Fetch VLANs immediately after enable and before config
           try {
             console.log("[SSH] Fetching VLANs in enable mode...");
