@@ -4,8 +4,10 @@
 A professional network operations management application for Huawei MA5801 OLT devices. This tool helps network operators manage GPON ONUs with safety guardrails to prevent accidental misconfigurations.
 
 ## Recent Changes (January 2026)
+- **Auto-detect GPON ports**: Automatically detects port count from OLT board info (8 or 16 ports)
 - **Database storage for OLT data**: All ONU, profile, and VLAN data now stored in database
-- **Manual sync from OLT**: Added "Sync from OLT" button to fetch fresh data from device
+- **Auto-sync every 60 minutes**: OLT data automatically refreshed in background
+- **Manual sync from OLT**: Added "Sync from OLT" button with 30-second cooldown
 - **Last sync time**: Shows when data was last refreshed from OLT
 - Added user authentication and authorization system
 - Implemented role-based access control (super_admin, admin, user)
@@ -14,6 +16,26 @@ A professional network operations management application for Huawei MA5801 OLT d
 - Protected all routes with authentication middleware
 - Fixed bound ONU parsing to handle Huawei spaced port format (0/ 1/0 → 0/1/0)
 - Improved SSH shell buffer handling for { <cr>||<K> } prompts
+
+## GPON Port Auto-Detection
+
+The app automatically detects available GPON ports from the OLT:
+
+### Detection Method
+1. Connects to OLT via SSH
+2. Runs `display board 0` command
+3. Parses board info to find GPON boards (boards with "GP" in name)
+4. Looks up known board types for port count
+
+### Known Board Types
+- **8-port boards**: H802GPBD, H802GPFA, H801GPBD, H801GPFA
+- **16-port boards**: H802GPFD, H802GPHF, V922GPHF, V921GPHF, etc.
+- **Unknown GP boards**: Default to 16 ports
+
+### Fallback Behavior
+- Before SSH connects: Shows 16 ports (0/1/0-7 and 0/2/0-7) as default
+- After SSH connects: Shows actual detected ports
+- Cached until reconnect for fast access
 
 ## Data Storage Architecture
 

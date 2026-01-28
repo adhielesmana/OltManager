@@ -23,6 +23,7 @@ export class HuaweiSSH {
   private currentResolve: ((output: string) => void) | null = null;
   private commandTimeout: NodeJS.Timeout | null = null;
   private lastVlanOutput: string = "";
+  private cachedGponPorts: string[] = [];
   
   // Lock for all SSH operations to prevent command interleaving
   private operationLock: Promise<void> | null = null;
@@ -270,6 +271,7 @@ export class HuaweiSSH {
     this.connected = false;
     this.commandQueue = [];
     this.isExecuting = false;
+    this.cachedGponPorts = []; // Clear cached ports on disconnect
   }
 
   isConnected(): boolean {
@@ -793,6 +795,11 @@ export class HuaweiSSH {
   }
 
   async getGponPorts(): Promise<string[]> {
+    // Return cached ports if available
+    if (this.cachedGponPorts.length > 0) {
+      return this.cachedGponPorts;
+    }
+    
     if (!this.isConnected()) {
       console.log("[SSH] Not connected, cannot get GPON ports");
       return [];
@@ -811,73 +818,121 @@ export class HuaweiSSH {
     }
 
     try {
-      // Use display board 0/1 or display interface to find GPON ports
-      // These commands work in config mode
-      let output = "";
-      try {
-        output = await this.executeCommand("display board 0/1");
-      } catch {
-        // If that fails, try different approach
-        output = await this.executeCommand("display board 0");
-      }
-      console.log(`[SSH] Board info raw output:\n${output}`);
-      
       const ports: string[] = [];
-      const lines = output.split('\n');
       
-      // Look for port count in output - format varies by OLT model
-      // Example: "  1    H802GPBD   Normal    Normal    16"
-      // Or: "PORT NUM: 16"
-      for (const line of lines) {
-        // Match lines with GPON board info that includes port count
-        const match = line.match(/^\s*(\d+)\s+\S*GP\S*\s+\S+\s+\S+\s+(\d+)/i);
-        if (match) {
-          const slot = parseInt(match[1]);
-          const portCount = parseInt(match[2]);
-          console.log(`[SSH] Found GPON slot ${slot} with ${portCount} ports`);
-          for (let p = 0; p < portCount; p++) {
-            ports.push(`0/${slot}/${p}`);
-          }
-        }
-        
-        // Also check for "PORT NUM: X" format
-        const portNumMatch = line.match(/PORT\s+NUM[:\s]+(\d+)/i);
-        if (portNumMatch && ports.length === 0) {
-          const portCount = parseInt(portNumMatch[1]);
-          console.log(`[SSH] Found ${portCount} ports from PORT NUM`);
-          for (let p = 0; p < portCount; p++) {
-            ports.push(`0/1/${p}`);
-          }
-        }
-      }
-      
-      // If no ports found, try interface gpon list
-      if (ports.length === 0) {
+      // Method 1: Try display port state for each possible slot
+      for (const slot of [1, 2]) {
         try {
-          const ifOutput = await this.executeCommand("display port state 0/1");
-          console.log(`[SSH] Port state output:\n${ifOutput.substring(0, 800)}`);
+          const output = await this.executeCommand(`display port state 0/${slot}`);
+          console.log(`[SSH] Port state 0/${slot} output:\n${output.substring(0, 500)}`);
           
-          // Parse for port entries (line with port numbers)
-          const ifLines = ifOutput.split('\n');
-          for (const line of ifLines) {
-            // Look for lines with port numbers like "0    up    up"
+          // Check if command succeeded (no error message)
+          if (output.includes("Unknown command") || output.includes("Failure") || output.includes("Error")) {
+            continue;
+          }
+          
+          // Parse for port entries - looking for port numbers in a table format
+          const lines = output.split('\n');
+          for (const line of lines) {
+            // Match lines like "0    up    up" or "15   down  down" 
             const portMatch = line.match(/^\s*(\d+)\s+(up|down)/i);
             if (portMatch) {
               const portNum = parseInt(portMatch[1]);
-              ports.push(`0/1/${portNum}`);
+              ports.push(`0/${slot}/${portNum}`);
             }
           }
+          
+          if (ports.length > 0) {
+            console.log(`[SSH] Found ${ports.length} ports on slot ${slot}`);
+          }
         } catch (err) {
-          console.log("[SSH] Port state query failed:", err);
+          console.log(`[SSH] Port state query for slot ${slot} failed:`, err);
         }
       }
       
-      console.log(`[SSH] Found ${ports.length} GPON ports: ${ports.join(', ')}`);
-      return ports.length > 0 ? ports.sort() : [];
+      // Method 2: If no ports found, try board info and detect by board name
+      if (ports.length === 0) {
+        try {
+          const output = await this.executeCommand("display board 0");
+          console.log(`[SSH] Board info output:\n${output.substring(0, 1000)}`);
+          
+          // Known Huawei GPON board types and their port counts
+          const boardPortCounts: Record<string, number> = {
+            // 8-port boards
+            'H802GPBD': 8, 'H802GPFA': 8, 'H801GPBD': 8, 'H801GPFA': 8,
+            'V802GPBD': 8, 'V802GPFA': 8, 'V801GPBD': 8, 'V801GPFA': 8,
+            // 16-port boards
+            'H802GPFD': 16, 'H802GPHF': 16, 'H801GPFD': 16, 'H801GPHF': 16,
+            'V802GPFD': 16, 'V802GPHF': 16, 'V922GPHF': 16, 'V921GPHF': 16,
+            'H805GPFD': 16, 'H806GPHF': 16,
+          };
+          
+          const lines = output.split('\n');
+          for (const line of lines) {
+            // Match lines with slot and board name: "  1       V922GPHF   Normal"
+            const match = line.match(/^\s*(\d+)\s+(\S+)\s+\S+/);
+            if (match) {
+              const slot = parseInt(match[1]);
+              const boardName = match[2].toUpperCase();
+              
+              // Skip if not a GPON board (must contain GP)
+              if (!boardName.includes('GP')) {
+                continue;
+              }
+              
+              // Look up exact board name first
+              let portCount = boardPortCounts[boardName];
+              
+              // If not found, check for partial matches
+              if (!portCount) {
+                for (const [boardType, count] of Object.entries(boardPortCounts)) {
+                  if (boardName.includes(boardType)) {
+                    portCount = count;
+                    break;
+                  }
+                }
+              }
+              
+              // Default to 16 ports for unknown GP boards
+              if (!portCount) {
+                portCount = 16;
+              }
+              
+              console.log(`[SSH] Found GPON board ${boardName} on slot ${slot} with ${portCount} ports`);
+              for (let p = 0; p < portCount; p++) {
+                ports.push(`0/${slot}/${p}`);
+              }
+            }
+          }
+        } catch (err) {
+          console.log("[SSH] Board info query failed:", err);
+        }
+      }
+      
+      // Cache the results
+      if (ports.length > 0) {
+        // Sort ports naturally (0/1/0, 0/1/1, ... 0/1/15, 0/2/0, ...)
+        this.cachedGponPorts = ports.sort((a, b) => {
+          const aParts = a.split('/').map(Number);
+          const bParts = b.split('/').map(Number);
+          for (let i = 0; i < 3; i++) {
+            if (aParts[i] !== bParts[i]) return aParts[i] - bParts[i];
+          }
+          return 0;
+        });
+        console.log(`[SSH] Cached ${this.cachedGponPorts.length} GPON ports: ${this.cachedGponPorts.join(', ')}`);
+      }
+      
+      return this.cachedGponPorts;
     } catch (error) {
       console.error("[SSH] Error getting GPON ports:", error);
       return [];
     }
+  }
+  
+  // Clear cached ports (called on disconnect or reconnect)
+  clearCachedPorts(): void {
+    this.cachedGponPorts = [];
   }
 
   async getVlans(): Promise<Vlan[]> {

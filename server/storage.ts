@@ -422,6 +422,11 @@ export class DatabaseStorage implements IStorage {
         return { success: false, message: `Cannot connect to OLT: ${connectResult.message}` };
       }
     }
+    
+    // Detect and cache GPON ports after connection (async, don't wait)
+    huaweiSSH.getGponPorts().catch(err => {
+      console.log("[Storage] GPON port detection failed:", err);
+    });
 
     // Wait for any ongoing refresh to complete
     if (this.refreshLock) {
