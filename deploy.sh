@@ -163,7 +163,8 @@ get_container_port() {
 # Diagnose and auto-repair port/nginx issues
 # ============================================================
 diagnose_and_repair() {
-    log_info "Running diagnostics..."
+    # ALL log output MUST go to stderr to avoid corrupting the returned port value
+    log_info "Running diagnostics..." >&2
     
     local nginx_port=$(get_nginx_config_port)
     local container_port=$(get_container_port)
@@ -175,34 +176,31 @@ diagnose_and_repair() {
         saved_port=$(grep '^SAVED_APP_PORT=' .env.production 2>/dev/null | cut -d= -f2)
     fi
     
-    log_info "Current state:"
-    log_info "  - Nginx config port: ${nginx_port:-NOT SET}"
-    log_info "  - Docker container port: ${container_port:-NOT RUNNING}"
-    log_info "  - Saved port (.env.production): ${saved_port:-NOT SET}"
+    log_info "Current state:" >&2
+    log_info "  - Nginx config port: ${nginx_port:-NOT SET}" >&2
+    log_info "  - Docker container port: ${container_port:-NOT RUNNING}" >&2
+    log_info "  - Saved port (.env.production): ${saved_port:-NOT SET}" >&2
     
     # Check for nginx config corruption
     local config_file="${NGINX_CONF_DIR}/${APP_NAME}"
     if [ -f "$config_file" ] && ! validate_nginx_config "$config_file"; then
-        log_warn "Issue: Nginx config is corrupted"
+        log_warn "Issue: Nginx config is corrupted" >&2
         issues_found=true
     fi
     
     # Check for port mismatch between nginx and container
     if [ -n "$nginx_port" ] && [ -n "$container_port" ] && [ "$nginx_port" != "$container_port" ]; then
-        log_warn "Issue: Port mismatch - nginx:$nginx_port vs container:$container_port"
-        log_warn "  This causes 502 Bad Gateway errors!"
+        log_warn "Issue: Port mismatch - nginx:$nginx_port vs container:$container_port" >&2
+        log_warn "  This causes 502 Bad Gateway errors!" >&2
         issues_found=true
     fi
     
-    # Return the port that should be used
+    # Return the port that should be used (ONLY this goes to stdout)
     if [ -n "$container_port" ]; then
-        # Container is running, use its port
         echo "$container_port"
     elif [ -n "$saved_port" ]; then
-        # Use saved port
         echo "$saved_port"
     elif [ -n "$nginx_port" ]; then
-        # Use nginx port
         echo "$nginx_port"
     fi
     
@@ -642,8 +640,12 @@ main() {
             --diagnose)
                 log_info "Diagnosing current deployment state..."
                 echo ""
-                diagnose_and_repair > /dev/null
+                # Run diagnostics - logs go to stderr (visible), port goes to stdout (captured)
+                DIAG_PORT=$(diagnose_and_repair)
                 echo ""
+                if [ -n "$DIAG_PORT" ]; then
+                    log_info "Recommended port: $DIAG_PORT"
+                fi
                 log_info "Run with --repair to auto-fix issues, or run without flags to redeploy"
                 exit 0
                 ;;
