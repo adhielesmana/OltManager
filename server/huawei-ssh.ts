@@ -283,16 +283,9 @@ export class HuaweiSSH {
       }
     }, 15000);
 
-    // Always disable pagination before each command to ensure full output
+    // Send command (screen-length is set once at session start)
     console.log(`[SSH] Executing: ${command}`);
-    this.shell.write("screen-length 0 temporary\n");
-    
-    // Small delay then send actual command
-    setTimeout(() => {
-      if (this.shell) {
-        this.shell.write(command + "\n");
-      }
-    }, 100);
+    this.shell.write(command + "\n");
   }
 
   async getOltInfo(): Promise<OltInfo> {
@@ -365,19 +358,22 @@ export class HuaweiSSH {
         }
       }
       
-      // Exit interface
-      await this.executeCommand("quit");
-      
-      // Get descriptions (runs in config mode, not interface mode)
+      // Get descriptions for each ONU (inside interface mode)
+      // Command format: display ont info <port> <onu-id>
       if (bound.length > 0) {
-        try {
-          const detailOutput = await this.executeCommand("display ont info 0 all detail");
-          console.log("[SSH] Raw detail output for descriptions:", detailOutput.substring(0, 500));
-          this.parseDescriptions(bound, detailOutput);
-        } catch (err) {
-          console.log("[SSH] Could not get ONU descriptions:", err);
+        for (const onu of bound) {
+          try {
+            const detailOutput = await this.executeCommand(`display ont info 0 ${onu.onuId}`);
+            console.log(`[SSH] Detail for ONU ${onu.onuId}:`, detailOutput.substring(0, 500));
+            this.parseOnuDescription(onu, detailOutput);
+          } catch (err) {
+            console.log(`[SSH] Could not get description for ONU ${onu.onuId}:`, err);
+          }
         }
       }
+      
+      // Exit interface
+      await this.executeCommand("quit");
       
       return { unbound, bound };
     } catch (err) {
@@ -386,40 +382,18 @@ export class HuaweiSSH {
     }
   }
   
-  private parseDescriptions(onus: BoundOnu[], output: string): void {
-    console.log("[SSH] Parsing descriptions, lines:", output.split("\n").length);
-    
-    let currentPort = "";
-    let currentOnuId = -1;
-    
+  private parseOnuDescription(onu: BoundOnu, output: string): void {
     for (const line of output.split("\n")) {
       const trimmedLine = line.trim();
-      // Match F/S/P and ONT ID lines (may have spaced format)
-      // Example:  -----------------------------------------------------------------------------
-      //           F/S/P                : 0/1/0
-      const portMatch = trimmedLine.match(/F\s*\/\s*S\s*\/\s*P\s*:\s*(\d+)\s*\/\s*(\d+)\s*\/\s*(\d+)/i);
-      if (portMatch) {
-        currentPort = `${portMatch[1]}/${portMatch[2]}/${portMatch[3]}`;
-        continue;
-      }
-      
-      const ontIdMatch = trimmedLine.match(/ONT\s*-?\s*ID\s*:\s*(\d+)/i);
-      if (ontIdMatch) {
-        currentOnuId = parseInt(ontIdMatch[1]);
-        continue;
-      }
-      
-      // Match description line
+      // Match description line: Description  : some text
       const descMatch = trimmedLine.match(/Description\s*:\s*(.+)/i);
-      if (descMatch && currentPort && currentOnuId >= 0) {
+      if (descMatch) {
         const description = descMatch[1].trim();
-        // The port in bound_onus table is normalized to 0/1/0 (no spaces)
-        const normalizedPort = currentPort.replace(/\s+/g, "");
-        const onu = onus.find(o => o.gponPort === normalizedPort && o.onuId === currentOnuId);
-        if (onu && description && description !== "-") {
+        if (description && description !== "-") {
           onu.description = description;
-          console.log(`[SSH] Found description: ${normalizedPort}/${currentOnuId} = "${description}"`);
+          console.log(`[SSH] Found description for ONU ${onu.onuId}: "${description}"`);
         }
+        break;
       }
     }
   }
