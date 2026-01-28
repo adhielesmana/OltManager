@@ -680,7 +680,7 @@ export class HuaweiSSH {
 
   async getVlans(): Promise<Vlan[]> {
     try {
-      const output = await this.executeCommand("display vlan");
+      const output = await this.executeCommand("display vlan all");
       return this.parseVlans(output);
     } catch (err) {
       console.error("[SSH] Error getting VLANs:", err);
@@ -692,21 +692,26 @@ export class HuaweiSSH {
     const vlans: Vlan[] = [];
     const lines = output.split("\n");
 
+    // Format: "   1  smart     common              4              0          -"
+    // Columns: VLAN, Type, Attribute, STND-Port NUM, SERV-Port NUM, VLAN-Con NUM
     for (const line of lines) {
-      const match = line.trim().match(/^(\d+)\s*(.*)/);
+      // Match line starting with spaces followed by VLAN ID, type, attribute
+      const match = line.trim().match(/^(\d+)\s+(smart|standard|mux|super)\s+(\w+)/i);
       if (match) {
         const id = parseInt(match[1]);
-        const description = match[2]?.trim() || "";
+        const type = match[2].toLowerCase();
+        const attribute = match[3];
         
-        if (!isNaN(id) && id > 0 && id < 4095 && !description.includes("VLAN") && !description.includes("---")) {
+        if (!isNaN(id) && id > 0 && id < 4095) {
           vlans.push({
             id: id,
             name: `VLAN ${id}`,
-            description: description || `VLAN ${id}`,
-            type: "smart",
+            description: `${type} - ${attribute}`,
+            type: type,
             tagged: true,
             inUse: false,
           });
+          console.log(`[SSH] Found VLAN: ${id} (${type})`);
         }
       }
     }
