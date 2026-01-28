@@ -27,6 +27,36 @@ export class HuaweiSSH {
   // Lock for all SSH operations to prevent command interleaving
   private operationLock: Promise<void> | null = null;
   private pendingDataFetch: Promise<{ unbound: UnboundOnu[], bound: BoundOnu[] }> | null = null;
+  
+  // Global cooldown: 30s wait after any operation completes before another can start
+  private lastOperationEndTime: number = 0;
+  private readonly OPERATION_COOLDOWN = 30000; // 30 seconds
+  
+  private async waitForCooldown(operationName: string): Promise<void> {
+    // Wait for any pending operations
+    if (this.operationLock) {
+      console.log(`[SSH] ${operationName}: Waiting for pending operation to complete...`);
+      await this.operationLock;
+    }
+    if (this.pendingDataFetch) {
+      console.log(`[SSH] ${operationName}: Waiting for pending data fetch to complete...`);
+      await this.pendingDataFetch;
+    }
+    
+    // Check cooldown from last operation
+    const now = Date.now();
+    const timeSinceLastOp = now - this.lastOperationEndTime;
+    if (this.lastOperationEndTime > 0 && timeSinceLastOp < this.OPERATION_COOLDOWN) {
+      const waitTime = this.OPERATION_COOLDOWN - timeSinceLastOp;
+      console.log(`[SSH] ${operationName}: Cooldown active, waiting ${Math.ceil(waitTime / 1000)}s...`);
+      await new Promise(r => setTimeout(r, waitTime));
+    }
+  }
+  
+  private markOperationComplete(): void {
+    this.lastOperationEndTime = Date.now();
+    console.log("[SSH] Operation complete, 30s cooldown started");
+  }
 
   async connect(config: HuaweiSSHConfig): Promise<{ success: boolean; message: string }> {
     return new Promise((resolve) => {
@@ -365,6 +395,9 @@ export class HuaweiSSH {
       return this.pendingDataFetch;
     }
     
+    // Wait for cooldown from any previous operation
+    await this.waitForCooldown("AutoSync");
+    
     // Create new fetch promise
     this.pendingDataFetch = this.doGetAllOnuData();
     
@@ -373,6 +406,7 @@ export class HuaweiSSH {
       return result;
     } finally {
       this.pendingDataFetch = null;
+      this.markOperationComplete();
     }
   }
   
@@ -815,15 +849,8 @@ export class HuaweiSSH {
       return { success: false, message: "Not connected to OLT" };
     }
 
-    // Wait for any pending operations to complete
-    if (this.operationLock) {
-      console.log("[SSH] Waiting for pending operations before unbind...");
-      await this.operationLock;
-    }
-    if (this.pendingDataFetch) {
-      console.log("[SSH] Waiting for pending data fetch before unbind...");
-      await this.pendingDataFetch;
-    }
+    // Wait for cooldown from any previous operation (includes waiting for pending ops)
+    await this.waitForCooldown("Unbind");
 
     // Create operation lock
     let releaseLock: () => void;
@@ -888,9 +915,10 @@ export class HuaweiSSH {
       }
       return { success: false, message: `Unbind failed: ${error.message}` };
     } finally {
-      // Release the lock
+      // Release the lock and mark operation complete
       this.operationLock = null;
       releaseLock!();
+      this.markOperationComplete();
     }
   }
 }

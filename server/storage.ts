@@ -90,7 +90,7 @@ export class DatabaseStorage implements IStorage {
     console.log("[Storage] Database storage initialized - data served from database");
     // Auto-reconnect to active OLT after startup
     setTimeout(() => this.autoReconnectOlt(), 2000);
-    // Start auto-sync every 5 minutes
+    // Start auto-sync every 60 minutes
     this.startAutoSync();
   }
 
@@ -100,9 +100,9 @@ export class DatabaseStorage implements IStorage {
       clearInterval(this.autoSyncInterval);
     }
     
-    // Auto-sync every 5 minutes (300000 ms)
-    const SYNC_INTERVAL = 5 * 60 * 1000;
-    console.log("[Storage] Auto-sync enabled: refreshing OLT data every 5 minutes");
+    // Auto-sync every 60 minutes (3600000 ms)
+    const SYNC_INTERVAL = 60 * 60 * 1000;
+    console.log("[Storage] Auto-sync enabled: refreshing OLT data every 60 minutes");
     
     this.autoSyncInterval = setInterval(async () => {
       try {
