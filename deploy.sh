@@ -734,6 +734,37 @@ main() {
                     exit 1
                 fi
                 
+                # Check if domain appears in OTHER nginx configs (conflict detection)
+                log_info "Checking for conflicting nginx configs..."
+                
+                # Find all configs that have our domain in server_name
+                for conf in /etc/nginx/sites-enabled/*; do
+                    if [ -f "$conf" ] && [ "$(basename "$conf")" != "${APP_NAME}" ]; then
+                        if grep -q "server_name.*${DOMAIN}" "$conf" 2>/dev/null; then
+                            log_warn "Found ${DOMAIN} in conflicting config: $conf"
+                            log_info "Removing ${DOMAIN} from $conf..."
+                            # Remove our domain from server_name line
+                            sed -i "s/${DOMAIN}//g" "$conf"
+                            # Clean up extra spaces
+                            sed -i 's/server_name  */server_name /g' "$conf"
+                            sed -i 's/  ;/;/g' "$conf"
+                        fi
+                    fi
+                done
+                
+                # Also check sites-available
+                for conf in /etc/nginx/sites-available/*; do
+                    if [ -f "$conf" ] && [ "$(basename "$conf")" != "${APP_NAME}" ]; then
+                        if grep -q "server_name.*${DOMAIN}" "$conf" 2>/dev/null; then
+                            log_warn "Found ${DOMAIN} in: $conf"
+                            log_info "Removing ${DOMAIN} from $conf..."
+                            sed -i "s/${DOMAIN}//g" "$conf"
+                            sed -i 's/server_name  */server_name /g' "$conf"
+                            sed -i 's/  ;/;/g' "$conf"
+                        fi
+                    fi
+                done
+                
                 log_info "Recreating nginx config for ${DOMAIN} -> port ${REPAIR_PORT}"
                 
                 # Remove old config completely
