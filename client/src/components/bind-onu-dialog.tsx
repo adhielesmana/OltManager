@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { bindOnuRequestSchema, type BindOnuRequest, type LineProfile, type ServiceProfile, type UnboundOnu, type Vlan } from "@shared/schema";
+import { bindOnuRequestSchema, type BindOnuRequest, type LineProfile, type ServiceProfile, type UnboundOnu, type Vlan, type OnuType } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import {
   Dialog,
@@ -32,7 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Shield, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Loader2, Shield, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface BindOnuDialogProps {
@@ -80,8 +80,11 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
       vlanId: undefined,
       pppoeUsername: "",
       pppoePassword: "",
+      onuType: "huawei",
     },
   });
+
+  const selectedOnuType = form.watch("onuType");
 
   // Reset form when dialog opens with selected ONU
   useEffect(() => {
@@ -95,6 +98,7 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
         vlanId: undefined,
         pppoeUsername: "",
         pppoePassword: "",
+        onuType: "huawei",
       });
       setSelectedPort(selectedOnu.gponPort || "0/1/0");
       setValidationStatus("idle");
@@ -108,6 +112,7 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
         vlanId: undefined,
         pppoeUsername: "",
         pppoePassword: "",
+        onuType: "huawei",
       });
       setSelectedPort("0/1/0");
       setValidationStatus("idle");
@@ -253,6 +258,40 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
                   <AlertTriangle className="h-4 w-4 text-red-600" />
                   <AlertDescription className="text-red-600 dark:text-red-400">
                     ONU validation failed. Check serial number.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              <FormField
+                control={form.control}
+                name="onuType"
+                render={({ field }) => (
+                  <FormItem className="col-span-2">
+                    <FormLabel>ONU Type</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value || "huawei"}
+                    >
+                      <FormControl>
+                        <SelectTrigger data-testid="select-onu-type">
+                          <SelectValue placeholder="Select ONU type" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="huawei">Huawei ONU (OMCI binding)</SelectItem>
+                        <SelectItem value="general">General ONU (Manual config)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {selectedOnuType === "general" && (
+                <Alert className="col-span-2 bg-blue-500/10 border-blue-500/20">
+                  <Info className="h-4 w-4 text-blue-600" />
+                  <AlertDescription className="text-blue-600 dark:text-blue-400">
+                    General ONU will be registered without OMCI binding. Configure the ONU manually via its web interface after binding.
                   </AlertDescription>
                 </Alert>
               )}

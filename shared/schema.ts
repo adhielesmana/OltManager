@@ -308,6 +308,10 @@ export const vlanSchema = z.object({
 });
 export type Vlan = z.infer<typeof vlanSchema>;
 
+// ONU type for binding - Huawei uses OMCI, General requires manual config
+export const onuTypeSchema = z.enum(["huawei", "general"]);
+export type OnuType = z.infer<typeof onuTypeSchema>;
+
 export const bindOnuRequestSchema = z.object({
   serialNumber: z.string().min(1, "Serial number is required"),
   gponPort: z.string().min(1, "GPON port is required"),
@@ -317,6 +321,7 @@ export const bindOnuRequestSchema = z.object({
   vlanId: z.number().optional(),
   pppoeUsername: z.string().optional(),
   pppoePassword: z.string().optional(),
+  onuType: onuTypeSchema.default("huawei"),
 });
 export type BindOnuRequest = z.infer<typeof bindOnuRequestSchema>;
 

@@ -1111,6 +1111,7 @@ export class HuaweiSSH {
     gemportId: number;
     pppoeUsername?: string;
     pppoePassword?: string;
+    onuType?: "huawei" | "general";
   }): Promise<{ success: boolean; message: string }> {
     if (!this.isConnected()) {
       return { success: false, message: "Not connected to OLT" };
@@ -1124,7 +1125,7 @@ export class HuaweiSSH {
     this.operationLock = new Promise<void>(resolve => { releaseLock = resolve; });
 
     try {
-      const { serialNumber, gponPort, onuId, lineProfileName, serviceProfileName, description, vlanId, gemportId, pppoeUsername, pppoePassword } = params;
+      const { serialNumber, gponPort, onuId, lineProfileName, serviceProfileName, description, vlanId, gemportId, pppoeUsername, pppoePassword, onuType = "huawei" } = params;
       
       // Parse port - format is "0/1/0" -> frame=0, slot=1, port=0
       const portParts = gponPort.split("/");
@@ -1133,7 +1134,8 @@ export class HuaweiSSH {
       }
       const [frame, slot, port] = portParts.map(p => parseInt(p));
 
-      console.log(`[SSH] Binding ONU ${serialNumber} to port ${gponPort} as ONU ID ${onuId}`);
+      const isGeneral = onuType === "general";
+      console.log(`[SSH] Binding ${isGeneral ? "General" : "Huawei"} ONU ${serialNumber} to port ${gponPort} as ONU ID ${onuId}`);
       console.log(`[SSH] Profiles: line=${lineProfileName}, service=${serviceProfileName}, vlan=${vlanId}`);
 
       // Step 1: Enter config mode
@@ -1149,14 +1151,27 @@ export class HuaweiSSH {
       const slotPort = String(port) + " " + String(onuId);
 
       // Step 3: Add the ONT
-      // Format: ont add [Slot/Port] sn-auth [SERIAL] omci ont-lineprofile-name LP ont-srvprofile-name SP desc [DESC]
-      const addCmd = "ont add " + slotPort + 
-        " sn-auth " + serialNumber + 
-        " omci ont-lineprofile-name " + lineProfileName + 
-        " ont-srvprofile-name " + serviceProfileName + 
-        " desc " + description.replace(/\s+/g, "_").substring(0, 32);
+      // Huawei ONU: uses "omci" for OMCI management binding
+      // General ONU: no "omci" - ONU is registered but config done manually via ONU web interface
+      let addCmd: string;
+      if (isGeneral) {
+        // General ONU - register without OMCI binding (manual configuration via ONU web interface)
+        addCmd = "ont add " + slotPort + 
+          " sn-auth " + serialNumber + 
+          " ont-lineprofile-name " + lineProfileName + 
+          " ont-srvprofile-name " + serviceProfileName + 
+          " desc " + description.replace(/\s+/g, "_").substring(0, 32);
+        console.log(`[SSH] Step 3: Adding General ONU (no OMCI) with: ${addCmd}`);
+      } else {
+        // Huawei ONU - standard OMCI binding
+        addCmd = "ont add " + slotPort + 
+          " sn-auth " + serialNumber + 
+          " omci ont-lineprofile-name " + lineProfileName + 
+          " ont-srvprofile-name " + serviceProfileName + 
+          " desc " + description.replace(/\s+/g, "_").substring(0, 32);
+        console.log(`[SSH] Step 3: Adding Huawei ONU (with OMCI) with: ${addCmd}`);
+      }
       
-      console.log(`[SSH] Step 3: Adding ONU with: ${addCmd}`);
       const addResult = await this.executeCommand(addCmd);
       console.log(`[SSH] Add result: ${addResult}`);
 

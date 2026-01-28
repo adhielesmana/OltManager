@@ -993,6 +993,7 @@ export class DatabaseStorage implements IStorage {
             gemportId: lineProfile.gemportId || 1,
             pppoeUsername: request.pppoeUsername,
             pppoePassword: request.pppoePassword,
+            onuType: request.onuType || "huawei",
           });
           
           if (bindResult.success) {

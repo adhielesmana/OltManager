@@ -101,6 +101,9 @@ Answer 3 key questions:
 - Did service come up?
 
 ### 4. Safe ONU Binding
+- **ONU Type Selection**: Choose between Huawei ONU (OMCI binding) or General ONU (manual config)
+  - **Huawei ONU**: Full OMCI binding - OLT manages ONU configuration automatically
+  - **General ONU**: No OMCI binding - ONU registers but requires manual config via ONU web interface
 - Validation before binding (ONU must be in autofind, not already bound)
 - Auto-detect next free ONU ID
 - Profile and VLAN validation
