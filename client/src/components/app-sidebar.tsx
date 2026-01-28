@@ -20,15 +20,20 @@ import {
   Network,
   Shield,
   Activity,
+  Users,
+  Server,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/lib/auth";
 import type { OltInfo } from "@shared/schema";
 
 const discoveryItems = [
   {
     title: "Unbound ONU",
-    url: "/unbound",
+    url: "/",
     icon: Link2Off,
     description: "Discovered but not configured",
   },
@@ -55,17 +60,37 @@ const configItems = [
   },
 ];
 
+const adminItems = [
+  {
+    title: "User Management",
+    url: "/users",
+    icon: Users,
+    description: "Manage system users",
+  },
+  {
+    title: "OLT Settings",
+    url: "/settings",
+    icon: Server,
+    description: "OLT connection settings",
+  },
+];
+
 export function AppSidebar() {
   const [location] = useLocation();
+  const { user, canManageUsers, canConfigureOlt } = useAuth();
 
   const { data: oltInfo } = useQuery<OltInfo>({
     queryKey: ["/api/olt/info"],
+    enabled: !!user,
   });
 
   const { data: unboundCount } = useQuery<{ count: number }>({
     queryKey: ["/api/onu/unbound/count"],
     refetchInterval: 5000,
+    enabled: !!user,
   });
+
+  const isConnected = oltInfo?.connected ?? false;
 
   return (
     <Sidebar>
@@ -91,9 +116,9 @@ export function AppSidebar() {
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild
-                    isActive={location === item.url || (item.url === "/unbound" && location === "/")}
+                    isActive={location === item.url || (item.url === "/" && location === "/unbound")}
                   >
-                    <Link href={item.url === "/unbound" ? "/" : item.url} data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
+                    <Link href={item.url} data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
                       <item.icon className="h-4 w-4" />
                       <span className="flex-1">{item.title}</span>
                       {item.title === "Unbound ONU" && unboundCount && unboundCount.count > 0 && (
@@ -128,26 +153,67 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {(canManageUsers || canConfigureOlt) && (
+          <SidebarGroup className="mt-4">
+            <SidebarGroupLabel className="text-xs font-medium text-muted-foreground px-2 mb-1">
+              Administration
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {adminItems.map((item) => {
+                  const isUsersItem = item.url === "/users";
+                  const isSettingsItem = item.url === "/settings";
+                  
+                  if (isUsersItem && !canManageUsers) return null;
+                  if (isSettingsItem && !canConfigureOlt) return null;
+                  
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton asChild isActive={location === item.url}>
+                        <Link href={item.url} data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
+                          <item.icon className="h-4 w-4" />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-4">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2 text-xs">
-            <Activity className="h-3.5 w-3.5 text-green-500 status-pulse" />
-            <span className="text-muted-foreground">OLT Connected</span>
+            {isConnected ? (
+              <>
+                <Wifi className="h-3.5 w-3.5 text-green-500" />
+                <span className="text-muted-foreground">OLT Connected</span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="h-3.5 w-3.5 text-orange-500" />
+                <span className="text-muted-foreground">OLT Disconnected</span>
+              </>
+            )}
           </div>
-          {oltInfo && (
+          {oltInfo && isConnected && (
             <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
               <span className="font-mono">{oltInfo.product}</span>
               <span className="font-mono text-[10px]">v{oltInfo.version}</span>
             </div>
           )}
-          <div className="flex items-center gap-1.5 mt-1">
-            <Shield className="h-3 w-3 text-muted-foreground" />
-            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
-              Provisioner Mode
-            </span>
-          </div>
+          {user && (
+            <div className="flex items-center gap-1.5 mt-1">
+              <Shield className="h-3 w-3 text-muted-foreground" />
+              <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                {user.role.replace("_", " ")} Mode
+              </span>
+            </div>
+          )}
         </div>
       </SidebarFooter>
     </Sidebar>

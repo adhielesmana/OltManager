@@ -1,5 +1,121 @@
+import { pgTable, text, serial, integer, boolean, timestamp, real } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import { relations } from "drizzle-orm";
 
+// User roles enum
+export const userRoleSchema = z.enum(["super_admin", "admin", "user"]);
+export type UserRole = z.infer<typeof userRoleSchema>;
+
+// Users table - stored in database (except super_admin which is hardcoded)
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  role: text("role").notNull().default("user"),
+  email: text("email"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdBy: integer("created_by"),
+  isActive: boolean("is_active").default(true).notNull(),
+});
+
+export const usersRelations = relations(users, ({ one }) => ({
+  createdByUser: one(users, {
+    fields: [users.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const insertUserSchema = createInsertSchema(users).omit({
+  id: true,
+  createdAt: true,
+});
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof users.$inferSelect;
+
+// Sessions table for login sessions
+export const sessions = pgTable("sessions", {
+  id: text("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  username: text("username").notNull(),
+  role: text("role").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+  user: one(users, {
+    fields: [sessions.userId],
+    references: [users.id],
+  }),
+}));
+
+export const insertSessionSchema = createInsertSchema(sessions).omit({
+  createdAt: true,
+});
+export type InsertSession = z.infer<typeof insertSessionSchema>;
+export type Session = typeof sessions.$inferSelect;
+
+// OLT Credentials table
+export const oltCredentials = pgTable("olt_credentials", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  host: text("host").notNull(),
+  port: integer("port").notNull().default(22),
+  username: text("username").notNull(),
+  passwordEncrypted: text("password_encrypted").notNull(),
+  protocol: text("protocol").notNull().default("ssh"),
+  isActive: boolean("is_active").default(true).notNull(),
+  isConnected: boolean("is_connected").default(false).notNull(),
+  lastConnected: timestamp("last_connected"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdBy: integer("created_by"),
+});
+
+export const oltCredentialsRelations = relations(oltCredentials, ({ one }) => ({
+  createdByUser: one(users, {
+    fields: [oltCredentials.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const insertOltCredentialSchema = createInsertSchema(oltCredentials).omit({
+  id: true,
+  createdAt: true,
+  isConnected: true,
+  lastConnected: true,
+});
+export type InsertOltCredential = z.infer<typeof insertOltCredentialSchema>;
+export type OltCredential = typeof oltCredentials.$inferSelect;
+
+// Login request schema
+export const loginRequestSchema = z.object({
+  username: z.string().min(1, "Username is required"),
+  password: z.string().min(1, "Password is required"),
+});
+export type LoginRequest = z.infer<typeof loginRequestSchema>;
+
+// Create user request schema (for admin)
+export const createUserRequestSchema = z.object({
+  username: z.string().min(3, "Username must be at least 3 characters"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+  role: userRoleSchema.exclude(["super_admin"]),
+  email: z.string().email().optional(),
+});
+export type CreateUserRequest = z.infer<typeof createUserRequestSchema>;
+
+// OLT credential request schema
+export const oltCredentialRequestSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  host: z.string().min(1, "Host is required"),
+  port: z.number().min(1).max(65535).default(22),
+  username: z.string().min(1, "Username is required"),
+  password: z.string().min(1, "Password is required"),
+  protocol: z.enum(["ssh", "telnet"]).default("ssh"),
+});
+export type OltCredentialRequest = z.infer<typeof oltCredentialRequestSchema>;
+
+// ONU Status schemas (for OLT data - not stored in DB, fetched from OLT)
 export const onuStatusSchema = z.enum(["online", "offline", "los", "auth-fail"]);
 export type OnuStatus = z.infer<typeof onuStatusSchema>;
 
@@ -95,13 +211,23 @@ export const onuVerificationSchema = z.object({
 });
 export type OnuVerification = z.infer<typeof onuVerificationSchema>;
 
-export const userRoleSchema = z.enum(["viewer", "provisioner", "admin"]);
-export type UserRole = z.infer<typeof userRoleSchema>;
-
 export const oltInfoSchema = z.object({
   product: z.string(),
   version: z.string(),
   patch: z.string(),
   uptime: z.string(),
+  connected: z.boolean(),
 });
 export type OltInfo = z.infer<typeof oltInfoSchema>;
+
+// Auth response type
+export const authResponseSchema = z.object({
+  user: z.object({
+    id: z.number(),
+    username: z.string(),
+    role: z.string(),
+    email: z.string().nullable(),
+  }),
+  sessionId: z.string(),
+});
+export type AuthResponse = z.infer<typeof authResponseSchema>;

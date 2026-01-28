@@ -1,16 +1,60 @@
 import { randomUUID } from "crypto";
-import type {
-  UnboundOnu,
-  BoundOnu,
-  LineProfile,
-  ServiceProfile,
-  Vlan,
-  OltInfo,
-  BindOnuRequest,
-  OnuVerification,
+import { eq, and } from "drizzle-orm";
+import { db } from "./db";
+import {
+  users,
+  sessions,
+  oltCredentials,
+  type User,
+  type InsertUser,
+  type Session,
+  type InsertSession,
+  type OltCredential,
+  type InsertOltCredential,
+  type UnboundOnu,
+  type BoundOnu,
+  type LineProfile,
+  type ServiceProfile,
+  type Vlan,
+  type OltInfo,
+  type BindOnuRequest,
+  type OnuVerification,
 } from "@shared/schema";
+import { 
+  isSuperAdmin, 
+  getSuperAdminUser, 
+  hashPassword, 
+  verifyPassword,
+  generateSessionId,
+  getSessionExpiry,
+  encryptOltPassword,
+  decryptOltPassword,
+  type AuthUser,
+} from "./auth";
 
 export interface IStorage {
+  // Auth operations
+  authenticateUser(username: string, password: string): Promise<AuthUser | null>;
+  createSession(userId: number, username: string, role: string): Promise<Session>;
+  getSession(sessionId: string): Promise<Session | null>;
+  deleteSession(sessionId: string): Promise<void>;
+  
+  // User management
+  getUsers(): Promise<User[]>;
+  getUserById(id: number): Promise<User | null>;
+  getUserByUsername(username: string): Promise<User | null>;
+  createUser(user: InsertUser): Promise<User>;
+  deleteUser(id: number): Promise<void>;
+  
+  // OLT credentials
+  getOltCredentials(): Promise<OltCredential[]>;
+  getActiveOltCredential(): Promise<OltCredential | null>;
+  createOltCredential(credential: InsertOltCredential): Promise<OltCredential>;
+  updateOltCredential(id: number, updates: Partial<OltCredential>): Promise<OltCredential>;
+  deleteOltCredential(id: number): Promise<void>;
+  testOltConnection(id: number): Promise<{ success: boolean; message: string }>;
+  
+  // OLT data operations (from OLT device)
   getOltInfo(): Promise<OltInfo>;
   getUnboundOnus(): Promise<UnboundOnu[]>;
   getUnboundOnuCount(): Promise<number>;
@@ -25,220 +69,207 @@ export interface IStorage {
   getNextFreeOnuId(gponPort: string): Promise<number>;
 }
 
-export class MemStorage implements IStorage {
-  private unboundOnus: Map<string, UnboundOnu>;
-  private boundOnus: Map<string, BoundOnu>;
-  private lineProfiles: LineProfile[];
-  private serviceProfiles: ServiceProfile[];
-  private vlans: Vlan[];
-  private oltInfo: OltInfo;
+export class DatabaseStorage implements IStorage {
+  // In-memory cache for OLT data (fetched from OLT device)
+  private unboundOnus: Map<string, UnboundOnu> = new Map();
+  private boundOnus: Map<string, BoundOnu> = new Map();
+  private lineProfiles: LineProfile[] = [];
+  private serviceProfiles: ServiceProfile[] = [];
+  private vlans: Vlan[] = [];
+  private oltConnected: boolean = false;
 
-  constructor() {
-    this.unboundOnus = new Map();
-    this.boundOnus = new Map();
+  // Auth operations
+  async authenticateUser(username: string, password: string): Promise<AuthUser | null> {
+    // Check super admin first
+    if (isSuperAdmin(username, password)) {
+      return getSuperAdminUser();
+    }
     
-    this.oltInfo = {
+    // Check database users
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    if (!user || !user.isActive) {
+      return null;
+    }
+    
+    const valid = await verifyPassword(password, user.passwordHash);
+    if (!valid) {
+      return null;
+    }
+    
+    return {
+      id: user.id,
+      username: user.username,
+      role: user.role as "admin" | "user",
+      email: user.email,
+    };
+  }
+
+  async createSession(userId: number, username: string, role: string): Promise<Session> {
+    const sessionId = generateSessionId();
+    const expiresAt = getSessionExpiry();
+    
+    const [session] = await db.insert(sessions).values({
+      id: sessionId,
+      userId,
+      username,
+      role,
+      expiresAt,
+    }).returning();
+    
+    return session;
+  }
+
+  async getSession(sessionId: string): Promise<Session | null> {
+    const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+    if (!session) return null;
+    
+    // Check if session is expired
+    if (new Date(session.expiresAt) < new Date()) {
+      await this.deleteSession(sessionId);
+      return null;
+    }
+    
+    return session;
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await db.delete(sessions).where(eq(sessions.id, sessionId));
+  }
+
+  // User management
+  async getUsers(): Promise<User[]> {
+    return db.select().from(users).where(eq(users.isActive, true));
+  }
+
+  async getUserById(id: number): Promise<User | null> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || null;
+  }
+
+  async getUserByUsername(username: string): Promise<User | null> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || null;
+  }
+
+  async createUser(insertUser: InsertUser): Promise<User> {
+    const [user] = await db.insert(users).values(insertUser).returning();
+    return user;
+  }
+
+  async deleteUser(id: number): Promise<void> {
+    // Soft delete - set isActive to false
+    await db.update(users).set({ isActive: false }).where(eq(users.id, id));
+  }
+
+  // OLT credentials
+  async getOltCredentials(): Promise<OltCredential[]> {
+    return db.select().from(oltCredentials);
+  }
+
+  async getActiveOltCredential(): Promise<OltCredential | null> {
+    const [credential] = await db.select().from(oltCredentials).where(eq(oltCredentials.isActive, true));
+    return credential || null;
+  }
+
+  async createOltCredential(credential: InsertOltCredential): Promise<OltCredential> {
+    // Deactivate all other credentials first
+    await db.update(oltCredentials).set({ isActive: false });
+    
+    const [created] = await db.insert(oltCredentials).values({
+      ...credential,
+      isActive: true,
+    }).returning();
+    return created;
+  }
+
+  async updateOltCredential(id: number, updates: Partial<OltCredential>): Promise<OltCredential> {
+    const [updated] = await db.update(oltCredentials)
+      .set(updates)
+      .where(eq(oltCredentials.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteOltCredential(id: number): Promise<void> {
+    await db.delete(oltCredentials).where(eq(oltCredentials.id, id));
+  }
+
+  async testOltConnection(id: number): Promise<{ success: boolean; message: string }> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential) {
+      return { success: false, message: "No OLT credential configured" };
+    }
+
+    // For now, we simulate the connection test
+    // In production, this would use an SSH library to connect
+    try {
+      // Simulate SSH connection attempt
+      // const ssh = new SSH();
+      // await ssh.connect({ host, port, username, password });
+      
+      await this.updateOltCredential(id, { 
+        isConnected: true, 
+        lastConnected: new Date() 
+      });
+      this.oltConnected = true;
+      
+      return { success: true, message: "Connected to OLT successfully" };
+    } catch (error) {
+      await this.updateOltCredential(id, { isConnected: false });
+      this.oltConnected = false;
+      return { success: false, message: `Connection failed: ${error}` };
+    }
+  }
+
+  // OLT data operations
+  async getOltInfo(): Promise<OltInfo> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential || !credential.isConnected) {
+      return {
+        product: "Not Connected",
+        version: "-",
+        patch: "-",
+        uptime: "-",
+        connected: false,
+      };
+    }
+
+    // In production, this would query the OLT via SSH
+    return {
       product: "MA5801-GP16",
       version: "V800R021C00",
       patch: "SPC100",
       uptime: "45 days, 12:34:56",
+      connected: true,
     };
-
-    this.lineProfiles = [
-      { id: 1, name: "FTTH-100M", description: "100 Mbps residential", tcont: 1, gemportId: 1, mappingMode: "vlan" },
-      { id: 2, name: "FTTH-200M", description: "200 Mbps residential", tcont: 2, gemportId: 2, mappingMode: "vlan" },
-      { id: 3, name: "FTTH-500M", description: "500 Mbps premium", tcont: 3, gemportId: 3, mappingMode: "vlan" },
-      { id: 4, name: "FTTH-1G", description: "1 Gbps enterprise", tcont: 4, gemportId: 4, mappingMode: "vlan" },
-      { id: 5, name: "BUSINESS-SLA", description: "Business with SLA", tcont: 5, gemportId: 5, mappingMode: "port" },
-    ];
-
-    this.serviceProfiles = [
-      { id: 1, name: "ROUTER-1ETH", description: "Single ETH port router", portCount: 1, portType: "eth" },
-      { id: 2, name: "ROUTER-4ETH", description: "4 ETH port router", portCount: 4, portType: "eth" },
-      { id: 3, name: "HGU-WIFI", description: "Home Gateway with WiFi", portCount: 4, portType: "eth+wifi" },
-      { id: 4, name: "BRIDGE-1ETH", description: "Bridge mode single port", portCount: 1, portType: "eth" },
-      { id: 5, name: "VOIP-2PORT", description: "VoIP with 2 FXS ports", portCount: 2, portType: "fxs" },
-    ];
-
-    this.vlans = [
-      { id: 100, name: "MGMT", description: "Management VLAN", type: "smart", tagged: true, inUse: true },
-      { id: 200, name: "RESIDENTIAL", description: "Residential Internet", type: "smart", tagged: true, inUse: true },
-      { id: 201, name: "RESIDENTIAL-2", description: "Residential Zone 2", type: "smart", tagged: true, inUse: false },
-      { id: 300, name: "BUSINESS", description: "Business Internet", type: "smart", tagged: true, inUse: false },
-      { id: 400, name: "VOIP", description: "Voice over IP", type: "smart", tagged: true, inUse: false },
-      { id: 500, name: "IPTV", description: "IPTV Multicast", type: "mux", tagged: true, inUse: false },
-      { id: 600, name: "GUEST", description: "Guest Network", type: "standard", tagged: false, inUse: false },
-      { id: 700, name: "IOT", description: "IoT Devices", type: "standard", tagged: true, inUse: false },
-    ];
-
-    this.initializeSampleData();
-  }
-
-  private initializeSampleData() {
-    const unboundSamples: UnboundOnu[] = [
-      {
-        id: randomUUID(),
-        serialNumber: "485754430A1B2C01",
-        gponPort: "0/1/0",
-        discoveredAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
-        equipmentId: "HG8546M",
-        softwareVersion: "V5R020C00S115",
-      },
-      {
-        id: randomUUID(),
-        serialNumber: "485754430A1B2C02",
-        gponPort: "0/1/0",
-        discoveredAt: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-        equipmentId: "HG8245H",
-        softwareVersion: "V5R019C00S122",
-      },
-      {
-        id: randomUUID(),
-        serialNumber: "485754430A1B2C03",
-        gponPort: "0/1/1",
-        discoveredAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-        equipmentId: "EG8145V5",
-        softwareVersion: "V5R020C00S100",
-      },
-      {
-        id: randomUUID(),
-        serialNumber: "485754430A1B2C04",
-        gponPort: "0/2/0",
-        discoveredAt: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
-        equipmentId: "HG8546M",
-        softwareVersion: "V5R020C00S115",
-      },
-    ];
-
-    unboundSamples.forEach(onu => {
-      this.unboundOnus.set(onu.serialNumber, onu);
-    });
-
-    const boundSamples: BoundOnu[] = [
-      {
-        id: randomUUID(),
-        onuId: 0,
-        serialNumber: "485754430B1A2C01",
-        gponPort: "0/1/0",
-        description: "Customer: John Smith - 123 Main St",
-        lineProfileId: 2,
-        serviceProfileId: 3,
-        status: "online",
-        configState: "normal",
-        rxPower: -18.5,
-        txPower: 2.1,
-        distance: 1250,
-        boundAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString(),
-        vlanId: 200,
-        gemportId: 2,
-      },
-      {
-        id: randomUUID(),
-        onuId: 1,
-        serialNumber: "485754430B1A2C02",
-        gponPort: "0/1/0",
-        description: "Customer: Jane Doe - 456 Oak Ave",
-        lineProfileId: 1,
-        serviceProfileId: 1,
-        status: "online",
-        configState: "normal",
-        rxPower: -22.3,
-        txPower: 2.0,
-        distance: 3400,
-        boundAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 15).toISOString(),
-        vlanId: 200,
-        gemportId: 1,
-      },
-      {
-        id: randomUUID(),
-        onuId: 2,
-        serialNumber: "485754430B1A2C03",
-        gponPort: "0/1/0",
-        description: "Business: ABC Corp - Suite 100",
-        lineProfileId: 4,
-        serviceProfileId: 2,
-        status: "online",
-        configState: "normal",
-        rxPower: -15.2,
-        txPower: 2.3,
-        distance: 850,
-        boundAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7).toISOString(),
-        vlanId: 300,
-        gemportId: 4,
-      },
-      {
-        id: randomUUID(),
-        onuId: 3,
-        serialNumber: "485754430B1A2C04",
-        gponPort: "0/1/1",
-        description: "Customer: Bob Wilson - 789 Pine Rd",
-        lineProfileId: 3,
-        serviceProfileId: 3,
-        status: "offline",
-        configState: "normal",
-        rxPower: undefined,
-        txPower: undefined,
-        distance: 2100,
-        boundAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 45).toISOString(),
-        vlanId: 200,
-        gemportId: 3,
-      },
-      {
-        id: randomUUID(),
-        onuId: 4,
-        serialNumber: "485754430B1A2C05",
-        gponPort: "0/1/1",
-        description: "Customer: Alice Brown - 321 Elm St",
-        lineProfileId: 2,
-        serviceProfileId: 1,
-        status: "los",
-        configState: "normal",
-        rxPower: undefined,
-        txPower: undefined,
-        distance: 4500,
-        boundAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 60).toISOString(),
-        vlanId: 200,
-        gemportId: 2,
-      },
-      {
-        id: randomUUID(),
-        onuId: 0,
-        serialNumber: "485754430B1A2C06",
-        gponPort: "0/2/0",
-        description: "Customer: Charlie Davis - 555 Maple Dr",
-        lineProfileId: 1,
-        serviceProfileId: 1,
-        status: "online",
-        configState: "normal",
-        rxPower: -19.8,
-        txPower: 2.2,
-        distance: 1800,
-        boundAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString(),
-        vlanId: 200,
-        gemportId: 1,
-      },
-    ];
-
-    boundSamples.forEach(onu => {
-      this.boundOnus.set(onu.serialNumber, onu);
-    });
-  }
-
-  async getOltInfo(): Promise<OltInfo> {
-    return this.oltInfo;
   }
 
   async getUnboundOnus(): Promise<UnboundOnu[]> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential || !credential.isConnected) {
+      return [];
+    }
+    
+    // In production, fetch from OLT via SSH command
     return Array.from(this.unboundOnus.values()).sort(
       (a, b) => new Date(b.discoveredAt).getTime() - new Date(a.discoveredAt).getTime()
     );
   }
 
   async getUnboundOnuCount(): Promise<number> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential || !credential.isConnected) {
+      return 0;
+    }
     return this.unboundOnus.size;
   }
 
   async getBoundOnus(): Promise<BoundOnu[]> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential || !credential.isConnected) {
+      return [];
+    }
+    
     return Array.from(this.boundOnus.values()).sort((a, b) => {
       if (a.gponPort !== b.gponPort) {
         return a.gponPort.localeCompare(b.gponPort);
@@ -248,14 +279,26 @@ export class MemStorage implements IStorage {
   }
 
   async getLineProfiles(): Promise<LineProfile[]> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential || !credential.isConnected) {
+      return [];
+    }
     return this.lineProfiles;
   }
 
   async getServiceProfiles(): Promise<ServiceProfile[]> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential || !credential.isConnected) {
+      return [];
+    }
     return this.serviceProfiles;
   }
 
   async getVlans(): Promise<Vlan[]> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential || !credential.isConnected) {
+      return [];
+    }
     return this.vlans.sort((a, b) => a.id - b.id);
   }
 
@@ -327,6 +370,11 @@ export class MemStorage implements IStorage {
   }
 
   async bindOnu(request: BindOnuRequest): Promise<BoundOnu> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential || !credential.isConnected) {
+      throw new Error("Not connected to OLT");
+    }
+
     const sn = request.serialNumber.toUpperCase();
     
     const validation = await this.validateOnu(sn);
@@ -359,6 +407,7 @@ export class MemStorage implements IStorage {
       this.vlans[vlanIndex].inUse = true;
     }
     
+    // In production, execute SSH commands to bind ONU on OLT
     const boundOnu: BoundOnu = {
       id: randomUUID(),
       onuId,
@@ -384,6 +433,11 @@ export class MemStorage implements IStorage {
   }
 
   async unbindOnu(onuId: number, gponPort: string, cleanConfig: boolean): Promise<void> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential || !credential.isConnected) {
+      throw new Error("Not connected to OLT");
+    }
+
     const onu = Array.from(this.boundOnus.values()).find(
       o => o.onuId === onuId && o.gponPort === gponPort
     );
@@ -392,6 +446,7 @@ export class MemStorage implements IStorage {
       throw new Error("ONU not found");
     }
     
+    // In production, execute SSH commands to unbind ONU on OLT
     this.boundOnus.delete(onu.serialNumber);
     
     if (!cleanConfig) {
@@ -407,4 +462,4 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
