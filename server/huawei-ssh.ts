@@ -680,7 +680,7 @@ export class HuaweiSSH {
 
   async getVlans(): Promise<Vlan[]> {
     try {
-      const output = await this.executeCommand("display vlan all");
+      const output = await this.executeCommand("display vlan");
       return this.parseVlans(output);
     } catch (err) {
       console.error("[SSH] Error getting VLANs:", err);
