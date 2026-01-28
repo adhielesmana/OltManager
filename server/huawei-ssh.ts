@@ -118,26 +118,34 @@ export class HuaweiSSH {
           if (this.shellBuffer.includes("---- More") || this.shellBuffer.includes("--More--")) {
             stream.write(" ");
             this.shellBuffer = this.shellBuffer.replace(/---- More.*----/g, "").replace(/--More--/g, "");
+            return;
+          }
+
+          // Handle <cr>||<K> prompts (Huawei parameter completion prompts) - send Enter
+          if (this.shellBuffer.includes("<cr>||<K>") || this.shellBuffer.includes("{ <cr>")) {
+            stream.write("\n");
+            return;
           }
 
           // Check for command completion (prompt returned)
-          if (this.currentResolve && (
-            this.shellBuffer.match(/[\r\n][^\r\n]*[>#]\s*$/) ||
-            this.shellBuffer.includes("end of configuration")
-          )) {
-            // Give a small delay to collect any remaining output
-            if (this.commandTimeout) {
-              clearTimeout(this.commandTimeout);
-            }
-            this.commandTimeout = setTimeout(() => {
-              if (this.currentResolve) {
-                this.currentResolve(this.shellBuffer);
-                this.currentResolve = null;
-                this.shellBuffer = "";
-                this.isExecuting = false;
-                this.processQueue();
+          // Huawei prompts look like: hostname# or hostname(config)# or hostname(config-if-gpon-0/1)#
+          if (this.currentResolve) {
+            const promptMatch = this.shellBuffer.match(/[\r\n][\w\-]+(\([^)]+\))?[#>]\s*$/);
+            if (promptMatch || this.shellBuffer.includes("end of configuration")) {
+              // Give a small delay to collect any remaining output
+              if (this.commandTimeout) {
+                clearTimeout(this.commandTimeout);
               }
-            }, 300);
+              this.commandTimeout = setTimeout(() => {
+                if (this.currentResolve) {
+                  this.currentResolve(this.shellBuffer);
+                  this.currentResolve = null;
+                  this.shellBuffer = "";
+                  this.isExecuting = false;
+                  this.processQueue();
+                }
+              }, 500);
+            }
           }
         });
 
@@ -258,19 +266,24 @@ export class HuaweiSSH {
 
   async getUnboundOnus(): Promise<UnboundOnu[]> {
     try {
-      const output = await this.executeCommand("display ont autofind all");
-      return this.parseUnboundOnus(output);
+      // Enter GPON interface first
+      await this.executeCommand("interface gpon 0/1");
+      const output = await this.executeCommand("display ont autofind 0");
+      // Exit interface
+      await this.executeCommand("quit");
+      return this.parseUnboundOnus(output, "0/1/0");
     } catch (err) {
       console.error("[SSH] Error getting unbound ONUs:", err);
       return [];
     }
   }
 
-  private parseUnboundOnus(output: string): UnboundOnu[] {
+  private parseUnboundOnus(output: string, defaultPort: string = "0/0/0"): UnboundOnu[] {
     const onus: UnboundOnu[] = [];
     const lines = output.split("\n");
 
     console.log("[SSH] Parsing autofind output, lines:", lines.length);
+    console.log("[SSH] Raw autofind output:", output.substring(0, 500));
 
     for (const line of lines) {
       const trimmedLine = line.trim();
@@ -305,7 +318,23 @@ export class HuaweiSSH {
           onus.push({
             id: sn,
             serialNumber: sn,
-            gponPort: "0/0/0",
+            gponPort: defaultPort,
+            equipmentId: "Unknown",
+            discoveredAt: new Date().toISOString(),
+          });
+        }
+      }
+
+      // Format: Number  SN  (line with just index and SN)
+      // Example: 1      48575443XXXXXXXX
+      const indexSnMatch = trimmedLine.match(/^(\d+)\s+([A-Fa-f0-9]{16})/i);
+      if (indexSnMatch) {
+        const sn = indexSnMatch[2].toUpperCase();
+        if (!onus.find(o => o.serialNumber === sn)) {
+          onus.push({
+            id: sn,
+            serialNumber: sn,
+            gponPort: defaultPort,
             equipmentId: "Unknown",
             discoveredAt: new Date().toISOString(),
           });
@@ -319,8 +348,10 @@ export class HuaweiSSH {
 
   async getBoundOnus(): Promise<BoundOnu[]> {
     try {
+      // Enter GPON interface first
+      await this.executeCommand("interface gpon 0/1");
       const output = await this.executeCommand("display ont info 0 all");
-      const onus = this.parseBoundOnus(output);
+      const onus = this.parseBoundOnus(output, "0/1/0");
       
       // Get optical info for status if we have bound ONUs
       if (onus.length > 0) {
@@ -332,6 +363,8 @@ export class HuaweiSSH {
         }
       }
       
+      // Exit interface
+      await this.executeCommand("quit");
       return onus;
     } catch (err) {
       console.error("[SSH] Error getting bound ONUs:", err);
@@ -339,11 +372,12 @@ export class HuaweiSSH {
     }
   }
 
-  private parseBoundOnus(output: string): BoundOnu[] {
+  private parseBoundOnus(output: string, defaultPort: string = "0/0/0"): BoundOnu[] {
     const onus: BoundOnu[] = [];
     const lines = output.split("\n");
 
     console.log("[SSH] Parsing bound ONU output, lines:", lines.length);
+    console.log("[SSH] Raw bound ONU output:", output.substring(0, 500));
 
     for (const line of lines) {
       const trimmedLine = line.trim();
