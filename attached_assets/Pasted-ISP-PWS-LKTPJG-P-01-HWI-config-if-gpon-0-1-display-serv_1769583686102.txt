@@ -1,0 +1,104 @@
+ISP-PWS-LKTPJG-P-01-HWI(config-if-gpon-0/1)#
+display service-port ont 0/1 0
+On Huawei OLT:
+
+display service-port is NOT valid under interface gpon
+
+So Huawei replied:
+
+% Unknown command
+But your app mistakenly interpreted that as “no service-port”.
+
+⚠️ This is a critical automation mistake.
+
+❌ Problem 2 — Command typo caused by prompt merging
+Your log shows:
+
+display service-portont0/10
+                        ^
+This means your app sent (or parsed) something like:
+
+display service-port ont 0/1 0
+but lost spaces due to:
+
+prompt not fully read
+
+newline handling issue
+
+shell buffer timing
+
+Huawei treats that as:
+
+display service-portont0/10
+➡️ Invalid command
+➡️ Not “no service-port”
+
+✅ Why ont delete still fails (correct behavior)
+Huawei is right to reject this:
+
+Failure: This configured object has some service virtual ports
+Because:
+
+Service-port DOES exist
+
+You just failed to detect it
+
+✅ THE CORRECT WAY (Huawei-safe & App-safe)
+✅ Rule 1 — ALWAYS exit GPON interface before checking service-port
+Your app must do this:
+
+quit
+Confirm prompt:
+
+(config)#
+✅ Rule 2 — Run service-port check ONLY in system-view
+Correct command (system-view):
+
+display service-port ont 0/1 0
+or broader (safer):
+
+display service-port port 0/1/0
+✅ Rule 3 — Treat “Unknown command” as FAILURE, not empty
+Your app logic must be:
+
+CLI Output	Meaning
+Service-Port ID	service exists
+No service virtual port information	no service
+Unknown command	❌ retry / wrong context
+Error locates at	❌ syntax error
+🛡️ CORRECT SAFE DELETE FLOW (FIXED)
+✅ Step-by-step (THIS WILL WORK)
+interface gpon 0/1
+quit
+display service-port ont 0/1 0
+undo service-port <ID>
+interface gpon 0/1
+ont delete 0
+🧠 App State Machine (IMPORTANT)
+Your app should track CLI state, not just send strings.
+
+Valid states:
+user-view
+
+system-view
+
+config-if-gpon
+
+Example logic:
+if command starts with "display service-port":
+    ensure state == system-view
+🔐 Guardrails you MUST add
+❌ Never parse output if command failed
+
+❌ Never continue delete after any CLI error
+
+✅ Require successful service-port detection OR confirmation of none
+
+✅ Log raw CLI output (you did this right 👏)
+
+🧪 Quick manual proof (try this manually)
+On the OLT CLI:
+
+quit
+display service-port ont 0/1 0
+You WILL see service-port IDs.
