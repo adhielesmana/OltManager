@@ -968,6 +968,7 @@ export class DatabaseStorage implements IStorage {
             serviceProfileName: serviceProfile.name,
             description: request.description,
             vlanId,
+            gemportId: lineProfile.gemportId || 1,
             pppoeUsername: request.pppoeUsername,
             pppoePassword: request.pppoePassword,
           });

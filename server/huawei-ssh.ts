@@ -863,6 +863,8 @@ export class HuaweiSSH {
       const opticalCmd = "display ont optical-info " + String(port) + " " + String(onuId);
       const output = await this.executeCommand(opticalCmd);
       
+      console.log(`[SSH] Optical info raw output:\n${output}`);
+      
       await this.executeCommand("quit");
 
       // Parse output for RX/TX power
@@ -917,6 +919,7 @@ export class HuaweiSSH {
     serviceProfileName: string;
     description: string;
     vlanId: number;
+    gemportId: number;
     pppoeUsername?: string;
     pppoePassword?: string;
   }): Promise<{ success: boolean; message: string }> {
@@ -932,7 +935,7 @@ export class HuaweiSSH {
     this.operationLock = new Promise<void>(resolve => { releaseLock = resolve; });
 
     try {
-      const { serialNumber, gponPort, onuId, lineProfileName, serviceProfileName, description, vlanId, pppoeUsername, pppoePassword } = params;
+      const { serialNumber, gponPort, onuId, lineProfileName, serviceProfileName, description, vlanId, gemportId, pppoeUsername, pppoePassword } = params;
       
       // Parse port - format is "0/1/0" -> frame=0, slot=1, port=0
       const portParts = gponPort.split("/");
@@ -1017,12 +1020,12 @@ export class HuaweiSSH {
 
       // Step 9: Create service-port to map VLAN (CRITICAL for VLAN passthrough)
       // This is required for both PPPoE and bridge mode
-      // Format: service-port vlan [VLAN] gpon [F/S/P] ont [ONU_ID] gemport 0 multi-service user-vlan [VLAN] tag-transform translate
-      console.log(`[SSH] Step 9: Creating service-port for VLAN ${vlanId}...`);
+      // Format: service-port vlan [VLAN] gpon [F/S/P] ont [ONU_ID] gemport [GEMPORT] multi-service user-vlan [VLAN] tag-transform translate
+      console.log(`[SSH] Step 9: Creating service-port for VLAN ${vlanId} with gemport ${gemportId}...`);
       const servicePortCmd = "service-port vlan " + String(vlanId) + 
         " gpon " + gponPort + 
         " ont " + String(onuId) + 
-        " gemport 0 multi-service user-vlan " + String(vlanId) + 
+        " gemport " + String(gemportId) + " multi-service user-vlan " + String(vlanId) + 
         " tag-transform translate";
       const servicePortResult = await this.executeCommand(servicePortCmd);
       console.log(`[SSH] Service-port result: ${servicePortResult.substring(0, 200)}`);
