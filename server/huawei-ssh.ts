@@ -1170,11 +1170,15 @@ export class HuaweiSSH {
         " ont " + String(onuId) + 
         " gemport " + String(gemportId) + " multi-service user-vlan " + String(vlanId) + 
         " tag-transform translate";
+      console.log(`[SSH] Service-port command: ${servicePortCmd}`);
       const servicePortResult = await this.executeCommand(servicePortCmd);
-      console.log(`[SSH] Service-port result: ${servicePortResult.substring(0, 200)}`);
+      console.log(`[SSH] Service-port full result:\n${servicePortResult}`);
 
-      if (servicePortResult.includes("Failure") || servicePortResult.includes("Error")) {
-        console.warn(`[SSH] Warning: Service-port creation may have failed: ${servicePortResult.substring(0, 200)}`);
+      if (servicePortResult.includes("Failure") || servicePortResult.includes("Error") || servicePortResult.includes("error")) {
+        console.error(`[SSH] ERROR: Service-port creation failed: ${servicePortResult}`);
+        // Don't return failure - the ONU is already bound, just log warning
+      } else if (servicePortResult.includes("success") || servicePortResult.includes("Index")) {
+        console.log(`[SSH] Service-port created successfully`);
       }
 
       console.log(`[SSH] Successfully bound ONU ${serialNumber} as ID ${onuId} on ${gponPort}`);

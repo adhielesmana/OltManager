@@ -986,12 +986,23 @@ export class DatabaseStorage implements IStorage {
               .where(and(eq(unboundOnus.oltCredentialId, credentialId), eq(unboundOnus.serialNumber, sn)));
             console.log(`[Storage] Removed ${sn} from unbound list`);
             
-            // Wait a moment for ONU to come online, then get optical info
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            // Wait for ONU to come online with retries
+            let opticalInfo = null;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              console.log(`[Storage] Waiting for ONU ${sn} to come online (attempt ${attempt}/3)...`);
+              await new Promise(resolve => setTimeout(resolve, 10000)); // 10 seconds per attempt
+              
+              console.log(`[Storage] Querying optical info for ONU ${sn}...`);
+              opticalInfo = await huaweiSSH.getOnuOpticalInfo(request.gponPort, onuId);
+              
+              if (opticalInfo && opticalInfo.rxPower !== undefined) {
+                console.log(`[Storage] Got optical info on attempt ${attempt}: rx=${opticalInfo.rxPower}, tx=${opticalInfo.txPower}`);
+                break;
+              }
+              console.log(`[Storage] ONU not online yet, retrying...`);
+            }
             
-            // Get optical power info
-            const opticalInfo = await huaweiSSH.getOnuOpticalInfo(request.gponPort, onuId);
-            if (opticalInfo) {
+            if (opticalInfo && (opticalInfo.rxPower !== undefined || opticalInfo.distance !== undefined)) {
               await db.update(boundOnus)
                 .set({
                   rxPower: opticalInfo.rxPower ?? null,
@@ -1001,6 +1012,8 @@ export class DatabaseStorage implements IStorage {
                 })
                 .where(eq(boundOnus.id, boundOnuId));
               console.log(`[Storage] Updated optical info for ONU ${sn}`);
+            } else {
+              console.log(`[Storage] Could not get optical info for ONU ${sn} after 3 attempts`);
             }
           } else {
             console.error(`[Storage] SSH bind failed for ONU ${sn}: ${bindResult.message}`);
