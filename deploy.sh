@@ -56,22 +56,22 @@ find_available_port() {
     local port=$BASE_PORT
     local attempts=0
     
-    log_info "Finding available port starting from $BASE_PORT..."
+    log_info "Finding available port starting from $BASE_PORT..." >&2
     
     while [ $attempts -lt $MAX_PORT_ATTEMPTS ]; do
         # Check if port is in use by any process
         if ! ss -tuln | grep -q ":$port " && \
            ! docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ":$port->"; then
-            log_success "Found available port: $port"
-            echo $port
+            log_success "Found available port: $port" >&2
+            echo "$port"
             return 0
         fi
-        log_warn "Port $port is in use, trying next..."
+        log_warn "Port $port is in use, trying next..." >&2
         port=$((port + 1))
         attempts=$((attempts + 1))
     done
     
-    log_error "Could not find available port after $MAX_PORT_ATTEMPTS attempts"
+    log_error "Could not find available port after $MAX_PORT_ATTEMPTS attempts" >&2
     exit 1
 }
 
