@@ -650,7 +650,16 @@ main() {
                 exit 0
                 ;;
             --repair)
-                log_info "Repairing deployment..."
+                # First, parse remaining args to get --domain if specified
+                shift
+                while [[ $# -gt 0 ]]; do
+                    case $1 in
+                        --domain) DOMAIN="$2"; shift 2 ;;
+                        *) shift ;;
+                    esac
+                done
+                
+                log_info "Repairing deployment for domain: ${DOMAIN}"
                 echo ""
                 
                 # Load saved config
