@@ -127,10 +127,25 @@ export class HuaweiSSH {
           }
 
           // Handle <cr>||<K> prompts (Huawei parameter completion prompts) - send Enter once
-          // Check if this is a fresh prompt (ends with }:) and we haven't already sent Enter
           if (this.shellBuffer.match(/\{\s*<cr>\|\|<K>\s*\}:\s*$/)) {
+            console.log("[SSH] Handling parameter completion prompt with Enter");
             stream.write("\n");
-            // Don't return - let it continue to check for completion
+            // Clear buffer partially to avoid re-triggering immediately
+            this.shellBuffer = this.shellBuffer.replace(/\{\s*<cr>\|\|<K>\s*\}:\s*$/, "");
+            return;
+          }
+
+          // Handle { <cr>|... } prompts (Huawei multi-option prompts)
+          // These prompts look like: { <cr>|vlanattr<K>|vlantype<E><mux,standard,smart,super>||<K> }: 
+          // We need to match the structure and the trailing }: 
+          if (this.shellBuffer.match(/\{\s*<cr>[\s\S]*?\}\s*:\s*$/)) {
+            console.log("[SSH] Handling multi-option prompt with Enter");
+            if (this.shell) {
+              this.shell.write("\n");
+            }
+            // Clear the specific prompt from buffer to avoid loops
+            this.shellBuffer = this.shellBuffer.replace(/\{\s*<cr>[\s\S]*?\}\s*:\s*$/, "");
+            return;
           }
 
           // Check for command completion (prompt returned)
@@ -734,7 +749,7 @@ export class HuaweiSSH {
             id: id,
             name: `VLAN ${id}`,
             description: `${type} - ${attribute}`,
-            type: type,
+            type: type as "smart" | "mux" | "standard",
             tagged: true,
             inUse: false,
           });
