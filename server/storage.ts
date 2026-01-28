@@ -113,6 +113,12 @@ export class DatabaseStorage implements IStorage {
         await db.update(oltCredentials)
           .set({ isConnected: true, lastConnected: new Date() })
           .where(eq(oltCredentials.id, credential.id));
+        
+        // Auto-refresh data after successful connection
+        console.log("[Storage] Automatically loading all OLT information...");
+        this.refreshOltData().catch(err => {
+          console.error("[Storage] Auto-refresh failed:", err.message);
+        });
       } else {
         console.log(`[Storage] Auto-reconnect failed: ${result.message}`);
         await db.update(oltCredentials)
