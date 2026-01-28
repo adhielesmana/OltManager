@@ -36,4 +36,4 @@ npx drizzle-kit push --force || {
 }
 
 echo "[Startup] Starting application..."
-exec node dist/index.js
+exec node dist/index.cjs
