@@ -921,26 +921,8 @@ export class DatabaseStorage implements IStorage {
     const onuId = await this.getNextFreeOnuId(request.gponPort);
     const vlanId = request.vlanId || 200;
     
-    // Execute SSH commands to bind ONU on OLT device
-    if (huaweiSSH.isConnected()) {
-      const bindResult = await huaweiSSH.bindOnu({
-        serialNumber: sn,
-        gponPort: request.gponPort,
-        onuId,
-        lineProfileName: lineProfile.name,
-        serviceProfileName: serviceProfile.name,
-        description: request.description,
-        vlanId,
-        pppoeUsername: request.pppoeUsername,
-        pppoePassword: request.pppoePassword,
-      });
-      
-      if (!bindResult.success) {
-        throw new Error(bindResult.message);
-      }
-    }
-    
-    // Insert into database
+    // Insert into database FIRST (fast response)
+    // SSH commands will run in background
     const [newBoundOnu] = await db.insert(boundOnus).values({
       onuId,
       serialNumber: sn,
@@ -967,6 +949,60 @@ export class DatabaseStorage implements IStorage {
     await db.update(vlans)
       .set({ inUse: true })
       .where(and(eq(vlans.oltCredentialId, credential.id), eq(vlans.vlanId, vlanId)));
+    
+    // Execute SSH commands in BACKGROUND (don't await - let it run async)
+    if (huaweiSSH.isConnected()) {
+      const credentialId = credential.id;
+      const boundOnuId = newBoundOnu.id;
+      
+      // Run SSH bind and optical update in background
+      (async () => {
+        try {
+          console.log(`[Storage] Starting background SSH bind for ONU ${sn}...`);
+          
+          const bindResult = await huaweiSSH.bindOnu({
+            serialNumber: sn,
+            gponPort: request.gponPort,
+            onuId,
+            lineProfileName: lineProfile.name,
+            serviceProfileName: serviceProfile.name,
+            description: request.description,
+            vlanId,
+            pppoeUsername: request.pppoeUsername,
+            pppoePassword: request.pppoePassword,
+          });
+          
+          if (bindResult.success) {
+            console.log(`[Storage] SSH bind successful for ONU ${sn}`);
+            
+            // Wait a moment for ONU to come online, then get optical info
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            
+            // Get optical power info
+            const opticalInfo = await huaweiSSH.getOnuOpticalInfo(request.gponPort, onuId);
+            if (opticalInfo) {
+              await db.update(boundOnus)
+                .set({
+                  rxPower: opticalInfo.rxPower ?? null,
+                  txPower: opticalInfo.txPower ?? null,
+                  distance: opticalInfo.distance ?? null,
+                  status: "online",
+                })
+                .where(eq(boundOnus.id, boundOnuId));
+              console.log(`[Storage] Updated optical info for ONU ${sn}`);
+            }
+          } else {
+            console.error(`[Storage] SSH bind failed for ONU ${sn}: ${bindResult.message}`);
+            // Update status to indicate config issue
+            await db.update(boundOnus)
+              .set({ configState: "failed" })
+              .where(eq(boundOnus.id, boundOnuId));
+          }
+        } catch (error) {
+          console.error(`[Storage] Background SSH bind error for ONU ${sn}:`, error);
+        }
+      })();
+    }
     
     return this.dbBoundToApi(newBoundOnu);
   }

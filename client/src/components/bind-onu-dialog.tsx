@@ -120,16 +120,10 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
       return response.json();
     },
     onSuccess: () => {
-      toast({
-        title: "ONU Bound Successfully",
-        description: "The ONU has been configured and is now active.",
-      });
+      // Refresh tables in background
       queryClient.invalidateQueries({ queryKey: ["/api/onu/unbound"] });
       queryClient.invalidateQueries({ queryKey: ["/api/onu/unbound/count"] });
       queryClient.invalidateQueries({ queryKey: ["/api/onu/bound"] });
-      onOpenChange(false);
-      form.reset();
-      setValidationStatus("idle");
     },
     onError: (error: Error) => {
       toast({
@@ -179,7 +173,18 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
       });
       return;
     }
+    
+    // Start binding in background
     bindMutation.mutate(data);
+    
+    // Close dialog immediately and show toast
+    toast({
+      title: "Binding ONU...",
+      description: "The ONU is being configured. The table will update automatically.",
+    });
+    onOpenChange(false);
+    form.reset();
+    setValidationStatus("idle");
   };
 
   const availableVlans = vlans.filter(v => !v.inUse);

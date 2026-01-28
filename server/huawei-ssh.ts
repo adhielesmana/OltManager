@@ -844,6 +844,71 @@ export class HuaweiSSH {
     return vlans;
   }
 
+  async getOnuOpticalInfo(gponPort: string, onuId: number): Promise<{ rxPower?: number; txPower?: number; distance?: number } | null> {
+    if (!this.isConnected()) {
+      return null;
+    }
+
+    try {
+      const portParts = gponPort.split("/");
+      if (portParts.length !== 3) {
+        return null;
+      }
+      const [frame, slot, port] = portParts.map(p => parseInt(p));
+
+      // Enter interface gpon
+      await this.executeCommand("interface gpon " + String(frame) + "/" + String(slot));
+      
+      // Get optical info for this specific ONU
+      const opticalCmd = "display ont optical-info " + String(port) + " " + String(onuId);
+      const output = await this.executeCommand(opticalCmd);
+      
+      await this.executeCommand("quit");
+
+      // Parse output for RX/TX power
+      // Format: ONU NNI upstream optical power(dBm)  : -X.XX
+      //         Laser bias current(mA)               : X.XX
+      //         Temperature(C)                       : XX
+      //         Voltage(V)                           : X.XX
+      //         ONU NNI downstream optical power(dBm): -X.XX
+      
+      let rxPower: number | undefined;
+      let txPower: number | undefined;
+      let distance: number | undefined;
+
+      const lines = output.split('\n');
+      for (const line of lines) {
+        // RX power (downstream)
+        if (line.includes("downstream optical power") || line.includes("Rx optical power")) {
+          const match = line.match(/([-\d.]+)\s*$/);
+          if (match) {
+            rxPower = parseFloat(match[1]);
+          }
+        }
+        // TX power (upstream)  
+        if (line.includes("upstream optical power") || line.includes("OLT Rx ONT optical power")) {
+          const match = line.match(/([-\d.]+)\s*$/);
+          if (match) {
+            txPower = parseFloat(match[1]);
+          }
+        }
+        // Distance
+        if (line.includes("ONU Distance") || line.includes("distance")) {
+          const match = line.match(/(\d+)/);
+          if (match) {
+            distance = parseInt(match[1]);
+          }
+        }
+      }
+
+      console.log(`[SSH] Optical info for ${gponPort} ONU ${onuId}: rx=${rxPower}, tx=${txPower}, distance=${distance}`);
+      return { rxPower, txPower, distance };
+    } catch (error) {
+      console.error("[SSH] Error getting optical info:", error);
+      return null;
+    }
+  }
+
   async bindOnu(params: {
     serialNumber: string;
     gponPort: string;
