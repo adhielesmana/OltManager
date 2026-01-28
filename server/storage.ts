@@ -31,6 +31,7 @@ import {
   decryptOltPassword,
   type AuthUser,
 } from "./auth";
+import { huaweiSSH } from "./huawei-ssh";
 
 export interface IStorage {
   // Auth operations
@@ -195,36 +196,87 @@ export class DatabaseStorage implements IStorage {
   }
 
   async testOltConnection(id: number): Promise<{ success: boolean; message: string }> {
-    const credential = await this.getActiveOltCredential();
+    const [credential] = await db.select().from(oltCredentials).where(eq(oltCredentials.id, id));
     if (!credential) {
-      return { success: false, message: "No OLT credential configured" };
+      return { success: false, message: "OLT credential not found" };
     }
 
-    // For now, we simulate the connection test
-    // In production, this would use an SSH library to connect
     try {
-      // Simulate SSH connection attempt
-      // const ssh = new SSH();
-      // await ssh.connect({ host, port, username, password });
-      
-      await this.updateOltCredential(id, { 
-        isConnected: true, 
-        lastConnected: new Date() 
+      // Disconnect any existing connection
+      if (huaweiSSH.isConnected()) {
+        huaweiSSH.disconnect();
+      }
+
+      // Decrypt password and connect via SSH
+      const password = decryptOltPassword(credential.passwordEncrypted);
+      const result = await huaweiSSH.connect({
+        host: credential.host,
+        port: credential.port,
+        username: credential.username,
+        password: password,
       });
-      this.oltConnected = true;
-      
-      return { success: true, message: "Connected to OLT successfully" };
-    } catch (error) {
+
+      if (result.success) {
+        // Mark as connected and set as active
+        await db.update(oltCredentials).set({ isActive: false }).execute();
+        await this.updateOltCredential(id, { 
+          isConnected: true, 
+          isActive: true,
+          lastConnected: new Date() 
+        });
+        this.oltConnected = true;
+        
+        // Fetch and cache initial data from OLT
+        await this.refreshOltData();
+        
+        return { success: true, message: "Connected to OLT successfully" };
+      } else {
+        await this.updateOltCredential(id, { isConnected: false });
+        this.oltConnected = false;
+        return result;
+      }
+    } catch (error: any) {
       await this.updateOltCredential(id, { isConnected: false });
       this.oltConnected = false;
-      return { success: false, message: `Connection failed: ${error}` };
+      return { success: false, message: `Connection failed: ${error.message}` };
+    }
+  }
+
+  private async refreshOltData(): Promise<void> {
+    if (!huaweiSSH.isConnected()) return;
+    
+    try {
+      console.log("[Storage] Refreshing OLT data...");
+      
+      // Fetch unbound ONUs
+      const unboundList = await huaweiSSH.getUnboundOnus();
+      this.unboundOnus.clear();
+      unboundList.forEach(onu => this.unboundOnus.set(onu.serialNumber, onu));
+      
+      // Fetch bound ONUs
+      const boundList = await huaweiSSH.getBoundOnus();
+      this.boundOnus.clear();
+      boundList.forEach(onu => this.boundOnus.set(onu.serialNumber, onu));
+      
+      // Fetch profiles
+      this.lineProfiles = await huaweiSSH.getLineProfiles();
+      this.serviceProfiles = await huaweiSSH.getServiceProfiles();
+      
+      // Fetch VLANs
+      this.vlans = await huaweiSSH.getVlans();
+      
+      console.log(`[Storage] Loaded: ${this.unboundOnus.size} unbound, ${this.boundOnus.size} bound ONUs`);
+      console.log(`[Storage] Loaded: ${this.lineProfiles.length} line profiles, ${this.serviceProfiles.length} service profiles`);
+      console.log(`[Storage] Loaded: ${this.vlans.length} VLANs`);
+    } catch (error) {
+      console.error("[Storage] Error refreshing OLT data:", error);
     }
   }
 
   // OLT data operations
   async getOltInfo(): Promise<OltInfo> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected) {
+    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
       return {
         product: "Not Connected",
         version: "-",
@@ -234,23 +286,25 @@ export class DatabaseStorage implements IStorage {
       };
     }
 
-    // In production, this would query the OLT via SSH
-    return {
-      product: "MA5801-GP16",
-      version: "V800R021C00",
-      patch: "SPC100",
-      uptime: "45 days, 12:34:56",
-      connected: true,
-    };
+    // Get real OLT info via SSH
+    return await huaweiSSH.getOltInfo();
   }
 
   async getUnboundOnus(): Promise<UnboundOnu[]> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected) {
+    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
       return [];
     }
     
-    // In production, fetch from OLT via SSH command
+    // Refresh unbound ONU data from OLT
+    try {
+      const unboundList = await huaweiSSH.getUnboundOnus();
+      this.unboundOnus.clear();
+      unboundList.forEach(onu => this.unboundOnus.set(onu.serialNumber, onu));
+    } catch (error) {
+      console.error("[Storage] Error fetching unbound ONUs:", error);
+    }
+    
     return Array.from(this.unboundOnus.values()).sort(
       (a, b) => new Date(b.discoveredAt).getTime() - new Date(a.discoveredAt).getTime()
     );
@@ -258,7 +312,7 @@ export class DatabaseStorage implements IStorage {
 
   async getUnboundOnuCount(): Promise<number> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected) {
+    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
       return 0;
     }
     return this.unboundOnus.size;
@@ -266,8 +320,17 @@ export class DatabaseStorage implements IStorage {
 
   async getBoundOnus(): Promise<BoundOnu[]> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected) {
+    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
       return [];
+    }
+    
+    // Refresh bound ONU data from OLT
+    try {
+      const boundList = await huaweiSSH.getBoundOnus();
+      this.boundOnus.clear();
+      boundList.forEach(onu => this.boundOnus.set(onu.serialNumber, onu));
+    } catch (error) {
+      console.error("[Storage] Error fetching bound ONUs:", error);
     }
     
     return Array.from(this.boundOnus.values()).sort((a, b) => {
@@ -280,25 +343,55 @@ export class DatabaseStorage implements IStorage {
 
   async getLineProfiles(): Promise<LineProfile[]> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected) {
+    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
       return [];
     }
+    
+    // Refresh if empty
+    if (this.lineProfiles.length === 0) {
+      try {
+        this.lineProfiles = await huaweiSSH.getLineProfiles();
+      } catch (error) {
+        console.error("[Storage] Error fetching line profiles:", error);
+      }
+    }
+    
     return this.lineProfiles;
   }
 
   async getServiceProfiles(): Promise<ServiceProfile[]> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected) {
+    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
       return [];
     }
+    
+    // Refresh if empty
+    if (this.serviceProfiles.length === 0) {
+      try {
+        this.serviceProfiles = await huaweiSSH.getServiceProfiles();
+      } catch (error) {
+        console.error("[Storage] Error fetching service profiles:", error);
+      }
+    }
+    
     return this.serviceProfiles;
   }
 
   async getVlans(): Promise<Vlan[]> {
     const credential = await this.getActiveOltCredential();
-    if (!credential || !credential.isConnected) {
+    if (!credential || !credential.isConnected || !huaweiSSH.isConnected()) {
       return [];
     }
+    
+    // Refresh if empty
+    if (this.vlans.length === 0) {
+      try {
+        this.vlans = await huaweiSSH.getVlans();
+      } catch (error) {
+        console.error("[Storage] Error fetching VLANs:", error);
+      }
+    }
+    
     return this.vlans.sort((a, b) => a.id - b.id);
   }
 
