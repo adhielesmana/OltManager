@@ -5,11 +5,19 @@
 # ============================================================
 # Features:
 # - Auto-detect available Docker port
-# - Skip nginx install if already exists
-# - Skip nginx config if already exists
+# - Port persistence (saved to .env.production)
+# - Diagnostics and auto-repair for port/nginx issues
+# - Skip nginx install if already exists  
+# - Only creates/updates nginx config for THIS app
 # - Auto SSL configuration with Let's Encrypt
 # - Database backup on every deployment
-# - Cleanup unused Docker resources older than 24h
+# - Safe cleanup (only affects this app, not other containers)
+#
+# Multi-Container Safe:
+# - Only manages container named "huawei-olt-manager"
+# - Only touches nginx config for this app
+# - Does NOT prune other containers, volumes, or networks
+# - Does NOT modify other nginx configurations
 # ============================================================
 
 set -e
@@ -377,32 +385,28 @@ backup_database() {
 }
 
 # ============================================================
-# 6. Cleanup unused Docker resources older than 24h
+# 6. Cleanup Docker resources (ONLY for this app)
 # ============================================================
 cleanup_docker() {
-    log_info "Cleaning up unused Docker resources older than 24 hours..."
+    log_info "Cleaning up Docker resources for ${APP_NAME} only..."
     
-    # Remove stopped containers older than 24h
-    docker container prune -f --filter "until=24h" 2>/dev/null || true
-    log_info "Removed old stopped containers"
+    # Only remove old images for THIS app (not other containers)
+    # Remove dangling images (untagged) that are older than 24h
+    docker image prune -f --filter "until=24h" --filter "dangling=true" 2>/dev/null || true
+    log_info "Removed dangling images older than 24h"
     
-    # Remove unused images older than 24h
-    docker image prune -a -f --filter "until=24h" 2>/dev/null || true
-    log_info "Removed unused images"
+    # Remove old images specifically for this app
+    local old_images=$(docker images "${APP_NAME}" --format "{{.ID}}" 2>/dev/null | tail -n +3)
+    if [ -n "$old_images" ]; then
+        echo "$old_images" | xargs -r docker rmi 2>/dev/null || true
+        log_info "Removed old ${APP_NAME} images (keeping latest 2)"
+    fi
     
-    # Remove unused volumes (be careful with this)
-    docker volume prune -f 2>/dev/null || true
-    log_info "Removed unused volumes"
-    
-    # Remove build cache older than 24h
+    # Clean build cache only (safe, doesn't affect running containers)
     docker builder prune -f --filter "until=24h" 2>/dev/null || true
-    log_info "Removed old build cache"
+    log_info "Cleaned build cache older than 24h"
     
-    # Remove unused networks
-    docker network prune -f 2>/dev/null || true
-    log_info "Removed unused networks"
-    
-    log_success "Docker cleanup completed"
+    log_success "Docker cleanup completed (other containers untouched)"
 }
 
 # ============================================================
