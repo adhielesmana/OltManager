@@ -873,6 +873,49 @@ export class HuaweiSSH {
       // Enter config mode
       await this.executeCommand("config");
       
+      // First, find and delete any service ports for this ONU
+      // Service ports are identified by frame/slot/port and ONU ID
+      const gponPortForSP = `${frame}/${slot}/${port}`;
+      console.log(`[SSH] Checking for service ports on ${gponPortForSP} ONU ${onuId}...`);
+      
+      try {
+        const spOutput = await this.executeCommand("display service-port all");
+        // Parse service port IDs that match this ONU
+        // Format: INDEX  VLAN  ...  F/S/P  VPI  VCI  FLOW  ...  STATE
+        const lines = spOutput.split('\n');
+        const servicePortIds: number[] = [];
+        
+        for (const line of lines) {
+          // Match lines containing our GPON port and ONU ID
+          // Example: "  0   100  gpon  0/1/0    0  ..."
+          if (line.includes('gpon') && line.includes(gponPortForSP)) {
+            // Check if this line contains our ONU ID
+            const parts = line.trim().split(/\s+/);
+            if (parts.length >= 5) {
+              const spIndex = parseInt(parts[0]);
+              // The ONU ID is typically after the port - look for it
+              const onuMatch = line.match(/\s+(\d+)\s+(\d+)\s*$/); // ONU ID near end
+              if (!isNaN(spIndex) && line.includes(` ${onuId} `)) {
+                servicePortIds.push(spIndex);
+                console.log(`[SSH] Found service-port ${spIndex} for ONU ${onuId}`);
+              }
+            }
+          }
+        }
+        
+        // Delete each service port
+        for (const spId of servicePortIds) {
+          console.log(`[SSH] Deleting service-port ${spId}...`);
+          await this.executeCommand(`undo service-port ${spId}`);
+        }
+        
+        if (servicePortIds.length > 0) {
+          console.log(`[SSH] Deleted ${servicePortIds.length} service port(s)`);
+        }
+      } catch (e) {
+        console.log(`[SSH] Could not check/delete service ports: ${e}`);
+      }
+
       // Enter GPON interface
       const ifaceResult = await this.executeCommand(`interface gpon ${frame}/${slot}`);
       console.log(`[SSH] Entered interface: ${ifaceResult.substring(0, 100)}`);
@@ -883,7 +926,12 @@ export class HuaweiSSH {
       const deleteResult = await this.executeCommand(deleteCmd);
       console.log(`[SSH] Delete result: ${deleteResult.substring(0, 300)}`);
 
-      // Check for errors
+      // Check for errors - but provide specific message for service port issue
+      if (deleteResult.includes("service virtual ports")) {
+        await this.executeCommand("quit");
+        return { success: false, message: "ONU has service ports that could not be auto-deleted. Please delete them manually first." };
+      }
+      
       if (deleteResult.includes("Failure") || deleteResult.includes("Unknown command")) {
         await this.executeCommand("quit");
         return { success: false, message: `Failed to unbind ONU: ${deleteResult}` };
