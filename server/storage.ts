@@ -86,8 +86,42 @@ export class DatabaseStorage implements IStorage {
   private refreshLock: Promise<void> | null = null;
 
   constructor() {
-    // No auto-reconnect - user must explicitly refresh data
     console.log("[Storage] Database storage initialized - data served from database");
+    // Auto-reconnect to active OLT after startup
+    setTimeout(() => this.autoReconnectOlt(), 2000);
+  }
+
+  private async autoReconnectOlt(): Promise<void> {
+    try {
+      const [credential] = await db.select().from(oltCredentials).where(eq(oltCredentials.isActive, true));
+      if (!credential) {
+        console.log("[Storage] No active OLT credential found");
+        return;
+      }
+
+      console.log(`[Storage] Auto-reconnecting to OLT: ${credential.name} (${credential.host}:${credential.port})`);
+      const password = decryptOltPassword(credential.passwordEncrypted);
+      const result = await huaweiSSH.connect({
+        host: credential.host,
+        port: credential.port,
+        username: credential.username,
+        password: password,
+      });
+
+      if (result.success) {
+        console.log("[Storage] Auto-reconnect successful");
+        await db.update(oltCredentials)
+          .set({ isConnected: true, lastConnected: new Date() })
+          .where(eq(oltCredentials.id, credential.id));
+      } else {
+        console.log(`[Storage] Auto-reconnect failed: ${result.message}`);
+        await db.update(oltCredentials)
+          .set({ isConnected: false })
+          .where(eq(oltCredentials.id, credential.id));
+      }
+    } catch (error: any) {
+      console.log(`[Storage] Auto-reconnect error: ${error.message}`);
+    }
   }
 
   // Helper to convert database record to API type
@@ -239,7 +273,12 @@ export class DatabaseStorage implements IStorage {
 
   // OLT credentials
   async getOltCredentials(): Promise<OltCredential[]> {
-    return db.select().from(oltCredentials);
+    const credentials = await db.select().from(oltCredentials);
+    // Override isConnected with actual SSH connection state
+    return credentials.map(cred => ({
+      ...cred,
+      isConnected: cred.isActive ? huaweiSSH.isConnected() : false
+    }));
   }
 
   async getActiveOltCredential(): Promise<OltCredential | null> {
