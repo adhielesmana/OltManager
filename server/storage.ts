@@ -427,6 +427,9 @@ export class DatabaseStorage implements IStorage {
       
       // Insert bound ONUs
       if (bound.length > 0) {
+        // Debug: log rxPower before saving
+        bound.forEach(o => console.log(`[Storage] ONU ${o.serialNumber} rxPower=${o.rxPower}, txPower=${o.txPower}, desc="${o.description}"`));
+        
         await db.insert(boundOnus).values(
           bound.map(onu => ({
             onuId: onu.onuId,

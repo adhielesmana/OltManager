@@ -680,9 +680,12 @@ export class HuaweiSSH {
 
   async getVlans(): Promise<Vlan[]> {
     try {
-      // Exit GPON interface first to run VLAN command from config mode
+      // Exit config mode to enable mode for VLAN command
+      await this.executeCommand("quit");
       await this.executeCommand("quit");
       const output = await this.executeCommand("display vlan all");
+      // Return to config mode after
+      await this.executeCommand("config");
       return this.parseVlans(output);
     } catch (err) {
       console.error("[SSH] Error getting VLANs:", err);
