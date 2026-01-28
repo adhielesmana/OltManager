@@ -86,7 +86,6 @@ export function AppSidebar() {
 
   const { data: unboundCount } = useQuery<{ count: number }>({
     queryKey: ["/api/onu/unbound/count"],
-    refetchInterval: 5000,
     enabled: !!user,
   });
 

@@ -48,7 +48,6 @@ export default function BoundOnuPage() {
 
   const { data: refreshStatus } = useQuery<{ lastRefreshed: string | null; inProgress: boolean; error: string | null }>({
     queryKey: ["/api/olt/refresh/status"],
-    refetchInterval: 5000,
   });
 
   const refreshMutation = useMutation({
