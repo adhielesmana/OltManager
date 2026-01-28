@@ -34,6 +34,14 @@ CONTAINER_NAME="${APP_NAME}"
 NGINX_CONF_DIR="/etc/nginx/sites-available"
 NGINX_ENABLED_DIR="/etc/nginx/sites-enabled"
 
+# Database container configuration
+DB_CONTAINER_NAME="${APP_NAME}-db"
+DB_IMAGE="postgres:15-alpine"
+DB_NAME="oltmanager"
+DB_USER="oltmanager"
+DB_PASSWORD=""  # Will be generated if not set
+DOCKER_NETWORK="${APP_NAME}-network"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -55,6 +63,84 @@ log_warn() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# ============================================================
+# 0. Setup Docker Network and Database Container
+# ============================================================
+setup_database() {
+    log_info "Setting up Docker network and database..."
+    
+    # Create Docker network if it doesn't exist
+    if ! docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1; then
+        log_info "Creating Docker network: $DOCKER_NETWORK"
+        docker network create "$DOCKER_NETWORK"
+    else
+        log_info "Docker network $DOCKER_NETWORK already exists"
+    fi
+    
+    # Generate database password if not set
+    if [ -z "$DB_PASSWORD" ]; then
+        # Try to load from .env.production first
+        if [ -f ".env.production" ] && grep -q "^DB_PASSWORD=" ".env.production"; then
+            DB_PASSWORD=$(grep "^DB_PASSWORD=" ".env.production" | cut -d'=' -f2-)
+            log_info "Using existing database password from .env.production"
+        else
+            DB_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
+            log_info "Generated new database password"
+        fi
+    fi
+    
+    # Check if database container exists
+    if docker ps -a --format '{{.Names}}' | grep -q "^${DB_CONTAINER_NAME}$"; then
+        # Container exists, check if running
+        if docker ps --format '{{.Names}}' | grep -q "^${DB_CONTAINER_NAME}$"; then
+            log_info "Database container already running"
+        else
+            log_info "Starting existing database container..."
+            docker start "$DB_CONTAINER_NAME"
+        fi
+    else
+        # Create new database container
+        log_info "Creating new PostgreSQL container: $DB_CONTAINER_NAME"
+        docker run -d \
+            --name "$DB_CONTAINER_NAME" \
+            --network "$DOCKER_NETWORK" \
+            --restart unless-stopped \
+            -e POSTGRES_DB="$DB_NAME" \
+            -e POSTGRES_USER="$DB_USER" \
+            -e POSTGRES_PASSWORD="$DB_PASSWORD" \
+            -v "${APP_NAME}_pgdata:/var/lib/postgresql/data" \
+            "$DB_IMAGE"
+        
+        # Wait for database to be ready
+        log_info "Waiting for database to be ready..."
+        sleep 5
+        
+        local retries=0
+        while [ $retries -lt 30 ]; do
+            if docker exec "$DB_CONTAINER_NAME" pg_isready -U "$DB_USER" >/dev/null 2>&1; then
+                log_success "Database is ready!"
+                break
+            fi
+            retries=$((retries + 1))
+            sleep 1
+        done
+        
+        if [ $retries -eq 30 ]; then
+            log_error "Database failed to start"
+            exit 1
+        fi
+    fi
+    
+    # Ensure database container is on the network
+    docker network connect "$DOCKER_NETWORK" "$DB_CONTAINER_NAME" 2>/dev/null || true
+    
+    # Set DATABASE_URL using container name (Docker DNS)
+    DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@${DB_CONTAINER_NAME}:5432/${DB_NAME}"
+    
+    log_success "Database setup complete"
+    log_info "DATABASE_URL: postgresql://${DB_USER}:****@${DB_CONTAINER_NAME}:5432/${DB_NAME}"
 }
 
 # ============================================================
@@ -461,6 +547,7 @@ deploy_application() {
     log_info "Starting new container on port ${port}..."
     docker run -d \
         --name "${CONTAINER_NAME}" \
+        --network "${DOCKER_NETWORK}" \
         --restart unless-stopped \
         -p "0.0.0.0:${port}:5000" \
         -e NODE_ENV=production \
@@ -908,7 +995,16 @@ NGINX_EOF
         fi
     fi
     
-    # Step 7: Deploy application
+    # Step 7: Setup database container
+    setup_database
+    echo ""
+    
+    # Save DB_PASSWORD to .env.production
+    if ! grep -q "^DB_PASSWORD=" ".env.production" 2>/dev/null; then
+        echo "DB_PASSWORD=${DB_PASSWORD}" >> .env.production
+    fi
+    
+    # Step 8: Deploy application
     deploy_application "$APP_PORT"
     echo ""
     
@@ -919,16 +1015,18 @@ NGINX_EOF
     echo ""
     echo "  Application: ${APP_NAME}"
     echo "  Container:   ${CONTAINER_NAME}"
+    echo "  Database:    ${DB_CONTAINER_NAME}"
     echo "  Port:        ${APP_PORT}"
     if [ "$SKIP_NGINX" != "true" ]; then
         echo "  Domain:      https://${DOMAIN}"
     fi
     echo ""
     echo "  Useful commands:"
-    echo "    View logs:     docker logs -f ${CONTAINER_NAME}"
-    echo "    Stop:          docker stop ${CONTAINER_NAME}"
-    echo "    Start:         docker start ${CONTAINER_NAME}"
-    echo "    Restart:       docker restart ${CONTAINER_NAME}"
+    echo "    App logs:      docker logs -f ${CONTAINER_NAME}"
+    echo "    DB logs:       docker logs -f ${DB_CONTAINER_NAME}"
+    echo "    Stop app:      docker stop ${CONTAINER_NAME}"
+    echo "    Start app:     docker start ${CONTAINER_NAME}"
+    echo "    Restart app:   docker restart ${CONTAINER_NAME}"
     echo ""
     echo "============================================================"
 }
