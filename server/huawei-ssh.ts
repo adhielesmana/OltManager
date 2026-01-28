@@ -495,6 +495,16 @@ export class HuaweiSSH {
         } catch (err) {
           console.log("[SSH] Could not get optical info");
         }
+        
+        // Get descriptions for each ONU
+        for (const onu of onus) {
+          try {
+            const detailOutput = await this.executeCommand(`display ont info 0 ${onu.onuId}`);
+            this.parseOnuDescription(onu, detailOutput);
+          } catch (err) {
+            console.log(`[SSH] Could not get description for ONU ${onu.onuId}`);
+          }
+        }
       }
       
       // Exit interface
