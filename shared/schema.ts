@@ -159,6 +159,8 @@ export const boundOnus = pgTable("bound_onus", {
   distance: integer("distance"),
   vlanId: integer("vlan_id"),
   gemportId: integer("gemport_id"),
+  pppoeUsername: text("pppoe_username"),
+  pppoePassword: text("pppoe_password"),
   oltCredentialId: integer("olt_credential_id").notNull(),
   boundAt: timestamp("bound_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -272,6 +274,8 @@ export const boundOnuSchema = z.object({
   boundAt: z.string(),
   vlanId: z.number().optional(),
   gemportId: z.number().optional(),
+  pppoeUsername: z.string().optional(),
+  pppoePassword: z.string().optional(),
 });
 export type BoundOnu = z.infer<typeof boundOnuSchema>;
 

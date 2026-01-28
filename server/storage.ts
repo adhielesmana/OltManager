@@ -191,6 +191,8 @@ export class DatabaseStorage implements IStorage {
       boundAt: dbOnu.boundAt.toISOString(),
       vlanId: dbOnu.vlanId ?? undefined,
       gemportId: dbOnu.gemportId ?? undefined,
+      pppoeUsername: dbOnu.pppoeUsername ?? undefined,
+      pppoePassword: dbOnu.pppoePassword ?? undefined,
     };
   }
 
@@ -937,6 +939,8 @@ export class DatabaseStorage implements IStorage {
       distance: null,
       vlanId,
       gemportId: lineProfile.gemportId,
+      pppoeUsername: request.pppoeUsername || null,
+      pppoePassword: request.pppoePassword || null,
       oltCredentialId: credential.id,
       boundAt: new Date(),
     }).returning();

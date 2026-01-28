@@ -369,13 +369,27 @@ export default function BoundOnuPage() {
                   <p className="text-xs text-muted-foreground">Service Profile</p>
                   <Badge variant="outline">{selectedOnu.serviceProfileId}</Badge>
                 </div>
-                {selectedOnu.vlanId && (
-                  <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">VLAN</p>
-                    <Badge variant="outline">{selectedOnu.vlanId}</Badge>
-                  </div>
-                )}
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">VLAN</p>
+                  <Badge variant="outline">{selectedOnu.vlanId || "N/A"}</Badge>
+                </div>
               </div>
+
+              {(selectedOnu.pppoeUsername || selectedOnu.pppoePassword) && (
+                <div className="border-t pt-4">
+                  <p className="text-sm font-medium mb-3">PPPoE Configuration</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Username</p>
+                      <p className="font-mono text-sm">{selectedOnu.pppoeUsername || "N/A"}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Password</p>
+                      <p className="font-mono text-sm">{selectedOnu.pppoePassword || "N/A"}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {(selectedOnu.rxPower !== undefined || selectedOnu.txPower !== undefined) && (
                 <div className="border-t pt-4">
