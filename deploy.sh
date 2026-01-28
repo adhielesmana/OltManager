@@ -658,39 +658,63 @@ main() {
                     source .env.production
                 fi
                 
-                # Get port directly without capturing log output
-                REPAIR_PORT=""
+                # Get port directly from running container
+                REPAIR_PORT=$(docker port "${CONTAINER_NAME}" 5000 2>/dev/null | sed 's/.*://' | head -1)
                 
-                # Priority 1: Running container port
-                REPAIR_PORT=$(get_container_port)
                 if [ -n "$REPAIR_PORT" ]; then
                     log_info "Found running container on port: $REPAIR_PORT"
-                fi
-                
-                # Priority 2: Saved port from .env.production
-                if [ -z "$REPAIR_PORT" ] && [ -n "$SAVED_APP_PORT" ]; then
+                elif [ -n "$SAVED_APP_PORT" ]; then
                     REPAIR_PORT="$SAVED_APP_PORT"
                     log_info "Using saved port from .env.production: $REPAIR_PORT"
-                fi
-                
-                # Priority 3: Port from nginx config
-                if [ -z "$REPAIR_PORT" ]; then
-                    REPAIR_PORT=$(get_nginx_config_port)
-                    if [ -n "$REPAIR_PORT" ]; then
-                        log_info "Using port from nginx config: $REPAIR_PORT"
-                    fi
-                fi
-                
-                if [ -z "$REPAIR_PORT" ]; then
+                else
                     log_error "Cannot determine port - no container running and no saved port"
                     log_info "Run a full deployment instead: ./deploy.sh --domain YOUR_DOMAIN"
                     exit 1
                 fi
                 
-                log_info "Repairing nginx config with port: $REPAIR_PORT"
+                log_info "Recreating nginx config for ${DOMAIN} -> port ${REPAIR_PORT}"
                 
-                # Fix nginx config
-                create_nginx_config "$REPAIR_PORT"
+                # Remove old config completely
+                rm -f "${NGINX_CONF_DIR}/${APP_NAME}"
+                rm -f "${NGINX_ENABLED_DIR}/${APP_NAME}"
+                log_info "Removed old nginx config"
+                
+                # Create fresh config
+                mkdir -p "$NGINX_CONF_DIR" "$NGINX_ENABLED_DIR"
+                
+                cat > "${NGINX_CONF_DIR}/${APP_NAME}" << NGINX_EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+
+    location / {
+        proxy_pass http://127.0.0.1:${REPAIR_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_read_timeout 86400;
+    }
+}
+NGINX_EOF
+                
+                # Enable the site
+                ln -sf "${NGINX_CONF_DIR}/${APP_NAME}" "${NGINX_ENABLED_DIR}/${APP_NAME}"
+                
+                # Test and reload nginx
+                if nginx -t 2>&1; then
+                    systemctl reload nginx
+                    log_success "Nginx config recreated and reloaded!"
+                    log_info "Domain ${DOMAIN} now points to port ${REPAIR_PORT}"
+                else
+                    log_error "Nginx config test failed"
+                    exit 1
+                fi
                 
                 log_success "Repair complete!"
                 exit 0
