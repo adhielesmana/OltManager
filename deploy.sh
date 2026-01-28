@@ -462,7 +462,7 @@ deploy_application() {
     docker run -d \
         --name "${CONTAINER_NAME}" \
         --restart unless-stopped \
-        -p "127.0.0.1:${port}:5000" \
+        -p "0.0.0.0:${port}:5000" \
         -e NODE_ENV=production \
         -e DATABASE_URL="${DATABASE_URL}" \
         -e SESSION_SECRET="${SESSION_SECRET}" \
