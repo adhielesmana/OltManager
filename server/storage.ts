@@ -78,6 +78,58 @@ export class DatabaseStorage implements IStorage {
   private serviceProfiles: ServiceProfile[] = [];
   private vlans: Vlan[] = [];
   private oltConnected: boolean = false;
+  private reconnectInterval: NodeJS.Timeout | null = null;
+
+  constructor() {
+    // Auto-reconnect on startup after a short delay
+    setTimeout(() => this.autoReconnect(), 3000);
+    
+    // Setup periodic reconnection check every 30 seconds
+    this.reconnectInterval = setInterval(() => this.checkAndReconnect(), 30000);
+  }
+
+  private async autoReconnect(): Promise<void> {
+    console.log("[Storage] Checking for active OLT credential to auto-reconnect...");
+    
+    try {
+      const credentials = await db.select().from(oltCredentials).where(eq(oltCredentials.isActive, true));
+      
+      if (credentials.length > 0) {
+        const credential = credentials[0];
+        console.log(`[Storage] Found active OLT: ${credential.name} (${credential.host})`);
+        console.log("[Storage] Attempting auto-reconnect...");
+        
+        const result = await this.testOltConnection(credential.id);
+        if (result.success) {
+          console.log("[Storage] Auto-reconnect successful!");
+        } else {
+          console.log(`[Storage] Auto-reconnect failed: ${result.message}`);
+        }
+      } else {
+        console.log("[Storage] No active OLT credential found, skipping auto-reconnect");
+      }
+    } catch (error) {
+      console.error("[Storage] Error during auto-reconnect:", error);
+    }
+  }
+
+  private async checkAndReconnect(): Promise<void> {
+    // Only attempt reconnect if we have an active credential but SSH is disconnected
+    if (huaweiSSH.isConnected()) {
+      return; // Already connected
+    }
+
+    try {
+      const credentials = await db.select().from(oltCredentials).where(eq(oltCredentials.isActive, true));
+      
+      if (credentials.length > 0 && credentials[0].isConnected) {
+        console.log("[Storage] SSH disconnected but credential marked connected, attempting reconnect...");
+        await this.testOltConnection(credentials[0].id);
+      }
+    } catch (error) {
+      // Silently ignore reconnect errors
+    }
+  }
 
   // Auth operations
   async authenticateUser(username: string, password: string): Promise<AuthUser | null> {
