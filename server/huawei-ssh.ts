@@ -334,10 +334,9 @@ export class HuaweiSSH {
       // Get descriptions (runs in config mode, not interface mode)
       if (bound.length > 0) {
         try {
-          await this.executeCommand("interface gpon 0/1");
           const detailOutput = await this.executeCommand("display ont info 0 all detail");
+          console.log("[SSH] Raw detail output for descriptions:", detailOutput.substring(0, 500));
           this.parseDescriptions(bound, detailOutput);
-          await this.executeCommand("quit");
         } catch (err) {
           console.log("[SSH] Could not get ONU descriptions:", err);
         }
@@ -357,25 +356,32 @@ export class HuaweiSSH {
     let currentOnuId = -1;
     
     for (const line of output.split("\n")) {
+      const trimmedLine = line.trim();
       // Match F/S/P and ONT ID lines (may have spaced format)
-      const portMatch = line.match(/F\s*\/\s*S\s*\/\s*P\s*:\s*(\d+)\s*\/\s*(\d+)\s*\/\s*(\d+)/i);
+      // Example:  -----------------------------------------------------------------------------
+      //           F/S/P                : 0/1/0
+      const portMatch = trimmedLine.match(/F\s*\/\s*S\s*\/\s*P\s*:\s*(\d+)\s*\/\s*(\d+)\s*\/\s*(\d+)/i);
       if (portMatch) {
         currentPort = `${portMatch[1]}/${portMatch[2]}/${portMatch[3]}`;
+        continue;
       }
       
-      const ontIdMatch = line.match(/ONT\s*-?\s*ID\s*:\s*(\d+)/i);
+      const ontIdMatch = trimmedLine.match(/ONT\s*-?\s*ID\s*:\s*(\d+)/i);
       if (ontIdMatch) {
         currentOnuId = parseInt(ontIdMatch[1]);
+        continue;
       }
       
       // Match description line
-      const descMatch = line.match(/Description\s*:\s*(.+)/i);
+      const descMatch = trimmedLine.match(/Description\s*:\s*(.+)/i);
       if (descMatch && currentPort && currentOnuId >= 0) {
         const description = descMatch[1].trim();
-        const onu = onus.find(o => o.gponPort === currentPort && o.onuId === currentOnuId);
+        // The port in bound_onus table is normalized to 0/1/0 (no spaces)
+        const normalizedPort = currentPort.replace(/\s+/g, "");
+        const onu = onus.find(o => o.gponPort === normalizedPort && o.onuId === currentOnuId);
         if (onu && description && description !== "-") {
           onu.description = description;
-          console.log(`[SSH] Found description: ${currentPort}/${currentOnuId} = "${description}"`);
+          console.log(`[SSH] Found description: ${normalizedPort}/${currentOnuId} = "${description}"`);
         }
       }
     }
@@ -682,9 +688,8 @@ export class HuaweiSSH {
     try {
       // Exit config mode to enable mode for VLAN command
       await this.executeCommand("quit");
-      await this.executeCommand("quit");
       const output = await this.executeCommand("display vlan all");
-      // Return to config mode after
+      // Return to config mode for other operations
       await this.executeCommand("config");
       return this.parseVlans(output);
     } catch (err) {
