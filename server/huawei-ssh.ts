@@ -888,9 +888,12 @@ export class HuaweiSSH {
       console.log(`[SSH] Step 2: Entering interface gpon ${frame}/${slot}...`);
       await this.executeCommand("interface gpon " + String(frame) + "/" + String(slot));
 
+      // Slot/Port format for commands: "PORT ONU_ID" e.g. "0 0"
+      const slotPort = String(port) + " " + String(onuId);
+
       // Step 3: Add the ONT
-      // Format: ont add PORT ONU_ID sn-auth SERIAL omci ont-lineprofile-name NAME ont-srvprofile-name NAME desc "DESC"
-      const addCmd = "ont add " + String(port) + " " + String(onuId) + 
+      // Format: ont add [Slot/Port] sn-auth [SERIAL] omci ont-lineprofile-name LP ont-srvprofile-name SP desc [DESC]
+      const addCmd = "ont add " + slotPort + 
         " sn-auth " + serialNumber + 
         " omci ont-lineprofile-name " + lineProfileName + 
         " ont-srvprofile-name " + serviceProfileName + 
@@ -905,23 +908,43 @@ export class HuaweiSSH {
         return { success: false, message: `Failed to add ONU: ${addResult.substring(0, 200)}` };
       }
 
-      // Step 4: Configure PPPoE if username and password provided
+      // Step 4-8: Configure PPPoE if username and password provided
       if (pppoeUsername && pppoePassword) {
         console.log(`[SSH] Step 4: Configuring PPPoE for user ${pppoeUsername}...`);
         
-        // ont ipconfig [port] [onu-id] pppoe vlan [vlan] priority 5 user-account username [user] password [pass]
-        const pppoeCmd = "ont ipconfig " + String(port) + " " + String(onuId) + 
+        // ont ipconfig [Slot/Port] pppoe vlan [VLAN] priority 5 user-account username [USER] password [PASS]
+        const pppoeCmd = "ont ipconfig " + slotPort + 
           " pppoe vlan " + String(vlanId) + 
           " priority 5 user-account username " + pppoeUsername + 
           " password " + pppoePassword;
         
-        console.log(`[SSH] Executing PPPoE config: ont ipconfig ${port} ${onuId} pppoe vlan ${vlanId} priority 5 user-account username ${pppoeUsername} password ****`);
+        console.log(`[SSH] Executing: ont ipconfig ${slotPort} pppoe vlan ${vlanId} priority 5 user-account username ${pppoeUsername} password ****`);
         const pppoeResult = await this.executeCommand(pppoeCmd);
         console.log(`[SSH] PPPoE result: ${pppoeResult}`);
 
-        if (pppoeResult.includes("Failure") || pppoeResult.includes("Error")) {
-          console.log(`[SSH] Warning: PPPoE configuration may have failed, but ONU was bound successfully`);
-        }
+        // Step 5: ont internet-config [Slot/Port] ip-index 0
+        console.log(`[SSH] Step 5: Configuring internet...`);
+        const internetCmd = "ont internet-config " + slotPort + " ip-index 0";
+        const internetResult = await this.executeCommand(internetCmd);
+        console.log(`[SSH] Internet config result: ${internetResult.substring(0, 100)}`);
+
+        // Step 6: ont wan-config [Slot/Port] ip-index 0 profile-name pppoe_wan
+        console.log(`[SSH] Step 6: Configuring WAN...`);
+        const wanCmd = "ont wan-config " + slotPort + " ip-index 0 profile-name pppoe_wan";
+        const wanResult = await this.executeCommand(wanCmd);
+        console.log(`[SSH] WAN config result: ${wanResult.substring(0, 100)}`);
+
+        // Step 7: ont policy-route-config [Slot/Port] profile-name pppoe_policy
+        console.log(`[SSH] Step 7: Configuring policy route...`);
+        const policyCmd = "ont policy-route-config " + slotPort + " profile-name pppoe_policy";
+        const policyResult = await this.executeCommand(policyCmd);
+        console.log(`[SSH] Policy route result: ${policyResult.substring(0, 100)}`);
+
+        // Step 8: ont port route [Slot/Port] eth 1-4 enable
+        console.log(`[SSH] Step 8: Enabling port routing...`);
+        const portRouteCmd = "ont port route " + slotPort + " eth 1-4 enable";
+        const portRouteResult = await this.executeCommand(portRouteCmd);
+        console.log(`[SSH] Port route result: ${portRouteResult.substring(0, 100)}`);
       }
 
       // Exit interface
