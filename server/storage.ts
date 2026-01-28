@@ -941,10 +941,6 @@ export class DatabaseStorage implements IStorage {
       boundAt: new Date(),
     }).returning();
     
-    // Remove from unbound list
-    await db.delete(unboundOnus)
-      .where(and(eq(unboundOnus.oltCredentialId, credential.id), eq(unboundOnus.serialNumber, sn)));
-    
     // Mark VLAN as in use
     await db.update(vlans)
       .set({ inUse: true })
@@ -975,6 +971,11 @@ export class DatabaseStorage implements IStorage {
           if (bindResult.success) {
             console.log(`[Storage] SSH bind successful for ONU ${sn}`);
             
+            // Only remove from unbound list AFTER successful bind
+            await db.delete(unboundOnus)
+              .where(and(eq(unboundOnus.oltCredentialId, credentialId), eq(unboundOnus.serialNumber, sn)));
+            console.log(`[Storage] Removed ${sn} from unbound list`);
+            
             // Wait a moment for ONU to come online, then get optical info
             await new Promise(resolve => setTimeout(resolve, 5000));
             
@@ -993,15 +994,27 @@ export class DatabaseStorage implements IStorage {
             }
           } else {
             console.error(`[Storage] SSH bind failed for ONU ${sn}: ${bindResult.message}`);
-            // Update status to indicate config issue
-            await db.update(boundOnus)
-              .set({ configState: "failed" })
-              .where(eq(boundOnus.id, boundOnuId));
+            // Delete from bound list since bind failed - ONU stays in unbound list
+            await db.delete(boundOnus).where(eq(boundOnus.id, boundOnuId));
+            // Release VLAN
+            await db.update(vlans)
+              .set({ inUse: false })
+              .where(and(eq(vlans.oltCredentialId, credentialId), eq(vlans.vlanId, vlanId)));
+            console.log(`[Storage] Reverted bind for ONU ${sn} - still in unbound list`);
           }
         } catch (error) {
           console.error(`[Storage] Background SSH bind error for ONU ${sn}:`, error);
+          // On error, revert - delete from bound, keep in unbound
+          await db.delete(boundOnus).where(eq(boundOnus.id, boundOnuId));
+          await db.update(vlans)
+            .set({ inUse: false })
+            .where(and(eq(vlans.oltCredentialId, credentialId), eq(vlans.vlanId, vlanId)));
         }
       })();
+    } else {
+      // No SSH connection - remove from unbound list anyway (manual config assumed)
+      await db.delete(unboundOnus)
+        .where(and(eq(unboundOnus.oltCredentialId, credential.id), eq(unboundOnus.serialNumber, sn)));
     }
     
     return this.dbBoundToApi(newBoundOnu);
