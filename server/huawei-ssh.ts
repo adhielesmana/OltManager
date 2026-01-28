@@ -296,6 +296,44 @@ export class HuaweiSSH {
       const versionMatch = output.match(/V\d+R\d+C\d+/i);
       const patchMatch = output.match(/SPC\d+/i);
       const uptimeMatch = output.match(/uptime is ([^\n]+)/i) || output.match(/Run time:([^\n]+)/i);
+      
+      // Get sysname/hostname from command output or prompt
+      let hostname = "";
+      let serialNumber = "";
+      
+      // First try to extract from command output prompt (e.g., "ISP-PWS-LKTPJG-P-01-HWI>")
+      const promptMatch = output.match(/\n([A-Za-z0-9_-]+)(?:\([^)]*\))?[#>]\s*$/m) ||
+                         output.match(/([A-Za-z0-9_-]+)(?:\([^)]*\))?[#>]/);
+      if (promptMatch && promptMatch[1]) {
+        hostname = promptMatch[1];
+      }
+      
+      // Try sysname command as fallback
+      if (!hostname) {
+        try {
+          const sysnameOutput = await this.executeCommand("display sysname");
+          const sysnameMatch = sysnameOutput.match(/sysname\s+(.+)/i) || 
+                              sysnameOutput.match(/System Name:\s*(.+)/i) ||
+                              sysnameOutput.match(/\n\s*([A-Za-z0-9_-]+)\s*$/m);
+          if (sysnameMatch) {
+            hostname = sysnameMatch[1].trim();
+          }
+        } catch (e) {
+          // Hostname extraction from prompt already attempted
+        }
+      }
+      
+      // Try to get device serial number from elabel
+      try {
+        const esOutput = await this.executeCommand("display elabel 0");
+        const snMatch = esOutput.match(/Bar\s*Code\s*:\s*([A-Z0-9]+)/i) || 
+                       esOutput.match(/Serial\s*Number\s*:\s*([A-Z0-9]+)/i);
+        if (snMatch) {
+          serialNumber = snMatch[1].trim();
+        }
+      } catch (e) {
+        // Serial number is optional
+      }
 
       return {
         product: productMatch ? productMatch[0] : "MA5801",
@@ -303,6 +341,9 @@ export class HuaweiSSH {
         patch: patchMatch ? patchMatch[0] : "-",
         uptime: uptimeMatch ? uptimeMatch[1].trim() : "Unknown",
         connected: true,
+        hostname: hostname || undefined,
+        model: productMatch ? productMatch[0] : undefined,
+        serialNumber: serialNumber || undefined,
       };
     } catch (err) {
       console.error("[SSH] Error getting OLT info:", err);
@@ -774,6 +815,20 @@ export class HuaweiSSH {
       return { success: false, message: "Not connected to OLT" };
     }
 
+    // Wait for any pending operations to complete
+    if (this.operationLock) {
+      console.log("[SSH] Waiting for pending operations before unbind...");
+      await this.operationLock;
+    }
+    if (this.pendingDataFetch) {
+      console.log("[SSH] Waiting for pending data fetch before unbind...");
+      await this.pendingDataFetch;
+    }
+
+    // Create operation lock
+    let releaseLock: () => void;
+    this.operationLock = new Promise<void>(resolve => { releaseLock = resolve; });
+
     try {
       // Parse port - format is "0/1/0" -> frame=0, slot=1, port=0
       const portParts = gponPort.split("/");
@@ -783,21 +838,42 @@ export class HuaweiSSH {
       const [frame, slot, port] = portParts.map(p => parseInt(p));
 
       console.log(`[SSH] Unbinding ONU ${onuId} from port ${gponPort}, cleanConfig=${cleanConfig}`);
+      console.log(`[SSH] Parsed port parts: frame=${frame}, slot=${slot}, port=${port}`);
+
+      const COMMAND_DELAY = 30000; // 30 seconds between commands
+
+      // First quit any current interface mode to ensure we're in config mode
+      console.log("[SSH] Step 1: Exiting current mode...");
+      await this.executeCommand("quit");
+      console.log("[SSH] Waiting 30s before next command...");
+      await new Promise(r => setTimeout(r, COMMAND_DELAY));
 
       // Enter GPON interface
-      await this.executeCommand(`interface gpon ${frame}/${slot}`);
+      console.log(`[SSH] Step 2: Entering interface gpon ${frame}/${slot}...`);
+      const ifaceResult = await this.executeCommand(`interface gpon ${frame}/${slot}`);
+      console.log(`[SSH] Interface result: ${ifaceResult.substring(0, 100)}`);
+      console.log("[SSH] Waiting 30s before next command...");
+      await new Promise(r => setTimeout(r, COMMAND_DELAY));
 
       // Delete the ONU
-      const deleteResult = await this.executeCommand(`ont delete ${port} ${onuId}`);
+      const deleteCmd = "ont delete " + String(port) + " " + String(onuId);
+      console.log(`[SSH] Step 3: Executing delete command: "${deleteCmd}"`);
+      const deleteResult = await this.executeCommand(deleteCmd);
       console.log(`[SSH] Delete result: ${deleteResult.substring(0, 300)}`);
 
       // Check for errors
-      if (deleteResult.includes("Failure") || deleteResult.includes("Error")) {
+      if (deleteResult.includes("Failure") || deleteResult.includes("Unknown command")) {
+        console.log("[SSH] Waiting 30s before quit...");
+        await new Promise(r => setTimeout(r, COMMAND_DELAY));
         await this.executeCommand("quit");
         return { success: false, message: `Failed to unbind ONU: ${deleteResult}` };
       }
 
+      console.log("[SSH] Waiting 30s before exit...");
+      await new Promise(r => setTimeout(r, COMMAND_DELAY));
+
       // Exit interface
+      console.log("[SSH] Step 4: Exiting interface...");
       await this.executeCommand("quit");
 
       console.log(`[SSH] Successfully unbound ONU ${onuId} from ${gponPort}`);
@@ -811,6 +887,10 @@ export class HuaweiSSH {
         // Ignore quit error
       }
       return { success: false, message: `Unbind failed: ${error.message}` };
+    } finally {
+      // Release the lock
+      this.operationLock = null;
+      releaseLock!();
     }
   }
 }

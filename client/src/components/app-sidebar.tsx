@@ -82,6 +82,7 @@ export function AppSidebar() {
   const { data: oltInfo } = useQuery<OltInfo>({
     queryKey: ["/api/olt/info"],
     enabled: !!user,
+    refetchInterval: 30000, // Refetch every 30s to get updated connection status
   });
 
   const { data: unboundCount } = useQuery<{ count: number }>({
@@ -188,20 +189,34 @@ export function AppSidebar() {
             {isConnected ? (
               <>
                 <Wifi className="h-3.5 w-3.5 text-green-500" />
-                <span className="text-muted-foreground">OLT Connected</span>
+                <span className="text-green-600 dark:text-green-400 font-medium">Connected</span>
               </>
             ) : (
               <>
                 <WifiOff className="h-3.5 w-3.5 text-orange-500" />
-                <span className="text-muted-foreground">OLT Disconnected</span>
+                <span className="text-orange-600 dark:text-orange-400">Disconnected</span>
               </>
             )}
           </div>
           {oltInfo && isConnected && (
-            <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
-              <span className="font-mono">{oltInfo.product}</span>
-              <span className="font-mono text-[10px]">v{oltInfo.version}</span>
+            <div className="flex flex-col gap-1 text-xs">
+              {oltInfo.hostname && (
+                <span className="font-medium text-foreground">{oltInfo.hostname}</span>
+              )}
+              <div className="flex flex-col gap-0.5 text-muted-foreground">
+                <span className="font-mono">{oltInfo.model || oltInfo.product}</span>
+                <span className="font-mono text-[10px]">
+                  {oltInfo.version !== "Unknown" ? `v${oltInfo.version}` : ""}
+                  {oltInfo.patch && oltInfo.patch !== "-" ? ` ${oltInfo.patch}` : ""}
+                </span>
+                {oltInfo.serialNumber && (
+                  <span className="font-mono text-[10px]">S/N: {oltInfo.serialNumber}</span>
+                )}
+              </div>
             </div>
+          )}
+          {!isConnected && oltInfo?.product && oltInfo.product !== "Not Connected" && (
+            <div className="text-xs text-muted-foreground font-mono">{oltInfo.product}</div>
           )}
           {user && (
             <div className="flex items-center gap-1.5 mt-1">

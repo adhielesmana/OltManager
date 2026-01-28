@@ -341,6 +341,9 @@ export const oltInfoSchema = z.object({
   patch: z.string(),
   uptime: z.string(),
   connected: z.boolean(),
+  hostname: z.string().optional(),
+  model: z.string().optional(),
+  serialNumber: z.string().optional(),
 });
 export type OltInfo = z.infer<typeof oltInfoSchema>;
 
