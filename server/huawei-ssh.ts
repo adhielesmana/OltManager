@@ -756,60 +756,75 @@ export class HuaweiSSH {
   }
   
   private parseWifiInfo(onu: BoundOnu, output: string): void {
-    // Parse WiFi SSID and password from "display ont wlan-info F/S/P ONT_ID" output
-    // Command: display ont wlan-info F/S/P O (Frame/Slot/Port OnuID)
-    // Always update with latest values from OLT (customer may have changed settings)
-    let foundSsid: string | null = null;
-    let foundPassword: string | null = null;
-    let foundSsid5G: string | null = null;
+    // Parse WiFi SSID from "display ont wlan-info F/S/P ONT_ID" output
+    // Example output format:
+    // F/S/P               : 0/1/15
+    // ONT ID              : 0
+    // The total number of SSID : 2
+    // -------------------------------------------------
+    // SSID Index          : 1
+    // SSID                : OLY
+    // Wireless Standard   : IEEE 802.11b/g/n
+    // -------------------------------------------------
+    // SSID Index          : 5
+    // SSID                : OLY-5G
+    // Wireless Standard   : IEEE 802.11ac
     
-    console.log(`[SSH] Parsing wlan-info for ONU ${onu.onuId}:`);
-    console.log(`[SSH] Raw wlan-info output: ${output.substring(0, 500)}`);
+    let foundSsid24: string | null = null;
+    let foundSsid5G: string | null = null;
+    let currentSsidIndex: number | null = null;
+    
+    console.log(`[SSH] Parsing wlan-info for ONU ${onu.onuId}`);
     
     for (const line of output.split("\n")) {
       const trimmedLine = line.trim();
       
-      // Match SSID: various formats from display ont wlan-info
-      // SSID: MyNetwork or SSID name: MyNetwork or ssid-name MyNetwork
-      // Also handle indexed formats: SSID 0: name, SSID 1: name
-      const ssidMatch = trimmedLine.match(/(?:SSID|ssid)[\s\-]*(?:name|0|1)?\s*[:\s]\s*(.+)/i);
+      // Match SSID Index: 1 or 5 etc
+      const indexMatch = trimmedLine.match(/^SSID\s+Index\s*:\s*(\d+)/i);
+      if (indexMatch) {
+        currentSsidIndex = parseInt(indexMatch[1], 10);
+        continue;
+      }
+      
+      // Match SSID: value (but not "SSID Index")
+      // Format: "SSID                : OLY"
+      const ssidMatch = trimmedLine.match(/^SSID\s*:\s*(.+)/i);
       if (ssidMatch) {
         const ssid = ssidMatch[1].trim();
-        if (ssid && ssid !== "-" && ssid.length > 0 && !ssid.includes("--")) {
-          // Check if this is 5GHz (usually index 1 or contains "5G")
-          if (trimmedLine.includes("1") || ssid.includes("5G")) {
+        if (ssid && ssid !== "-" && ssid.length > 0) {
+          // Determine if 2.4GHz or 5GHz based on:
+          // 1. SSID Index (1=2.4GHz, 5=5GHz typically)
+          // 2. Wireless Standard (802.11b/g/n = 2.4GHz, 802.11ac/ax = 5GHz)
+          // 3. SSID name contains "5G"
+          if (currentSsidIndex === 5 || ssid.toLowerCase().includes("5g")) {
             if (!foundSsid5G) foundSsid5G = ssid;
-          } else if (!foundSsid) {
-            foundSsid = ssid;
+          } else {
+            if (!foundSsid24) foundSsid24 = ssid;
           }
         }
       }
       
-      // Match password/key: various formats  
-      // WPA key: xxx or password: xxx or WPA-PSK key: xxx or psk-password xxx
-      const passMatch = trimmedLine.match(/(?:WPA.*key|password|WPA-PSK|psk|key|psk-password)\s*[:\s]\s*(\S+)/i);
-      if (passMatch && !foundPassword) {
-        const pass = passMatch[1].trim();
-        if (pass && pass !== "-" && pass.length > 0) {
-          foundPassword = pass;
+      // Also check Wireless Standard to help categorize
+      const wirelessMatch = trimmedLine.match(/^Wireless\s+Standard\s*:\s*(.+)/i);
+      if (wirelessMatch && currentSsidIndex !== null) {
+        const standard = wirelessMatch[1].trim();
+        // 802.11ac or 802.11ax are 5GHz standards
+        if (standard.includes("802.11ac") || standard.includes("802.11ax")) {
+          // This confirms the current SSID is 5GHz
         }
       }
     }
     
-    // Always update with latest values from OLT (overwrite existing)
-    if (foundSsid || foundSsid5G) {
-      // Combine 2.4GHz and 5GHz SSIDs if both found
-      if (foundSsid && foundSsid5G) {
-        onu.wifiSsid = `${foundSsid} / ${foundSsid5G}`;
+    // Update ONU with found SSIDs
+    if (foundSsid24 || foundSsid5G) {
+      if (foundSsid24 && foundSsid5G) {
+        onu.wifiSsid = `${foundSsid24} / ${foundSsid5G}`;
       } else {
-        onu.wifiSsid = foundSsid || foundSsid5G || undefined;
+        onu.wifiSsid = foundSsid24 || foundSsid5G || undefined;
       }
       console.log(`[SSH] WiFi SSID for ONU ${onu.onuId}: "${onu.wifiSsid}"`);
     }
-    if (foundPassword) {
-      onu.wifiPassword = foundPassword;
-      console.log(`[SSH] WiFi password updated for ONU ${onu.onuId}`);
-    }
+    // Note: Password is not shown in wlan-info output for security reasons
   }
 
   // Parse VLAN info from "display service-port gpon 0/slot" output and update ONUs
