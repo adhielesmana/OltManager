@@ -760,60 +760,107 @@ export class DatabaseStorage implements IStorage {
     }
 
     try {
-      console.log("[Storage] Refreshing bound ONUs from OLT...");
-      const boundList = await huaweiSSH.getBoundOnus();
+      console.log("[Storage] Refreshing bound ONUs from OLT (merge approach)...");
+      const sshList = await huaweiSSH.getBoundOnus();
       
-      // Get existing bound ONUs to preserve PPPoE info and for comparison
-      const existingOnus = await db.select().from(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id));
-      const existingByKey = new Map(existingOnus.map(o => [`${o.gponPort}-${o.onuId}`, o]));
+      // Get existing bound ONUs from database
+      const dbOnus = await db.select().from(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id));
       
-      // Only replace data if OLT returned results, otherwise keep existing data
-      if (boundList.length === 0 && existingOnus.length > 0) {
-        console.log(`[Storage] OLT returned 0 bound ONUs but we have ${existingOnus.length} in database - keeping existing data`);
-        return { success: true, message: `OLT returned no data, keeping ${existingOnus.length} existing ONUs` };
-      }
+      // Create lookup maps
+      // Key: serialNumber (primary identifier)
+      // Secondary key: gponPort-onuId (for matching position)
+      const sshBySerial = new Map(sshList.map(o => [o.serialNumber, o]));
+      const sshByPosition = new Map(sshList.map(o => [`${o.gponPort}-${o.onuId}`, o]));
+      const dbBySerial = new Map(dbOnus.map(o => [o.serialNumber, o]));
       
-      // Clear old bound data and insert new
-      await db.delete(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id));
+      console.log(`[Storage] DB has ${dbOnus.length} ONUs, SSH returned ${sshList.length} ONUs`);
       
-      if (boundList.length > 0) {
-        // Log what SSH returned (before any merging with existing)
-        console.log("[Storage] ===== ONU DATA FROM SSH =====");
-        boundList.forEach(onu => {
-          console.log(`[Storage] SSH ONU ${onu.gponPort}/${onu.onuId}: desc="${onu.description || '(empty)'}", pppoe="${onu.pppoeUsername || '(none)'}", wifi="${onu.wifiSsid || '(none)'}"`);
-        });
+      // Track what we do
+      let updated = 0;
+      let inserted = 0;
+      let deleted = 0;
+      
+      // Step 1: Process each DB record
+      for (const dbOnu of dbOnus) {
+        const sshOnu = sshBySerial.get(dbOnu.serialNumber);
         
-        await db.insert(boundOnus).values(
-          boundList.map(onu => {
-            // Preserve PPPoE info from existing record if available
-            const existing = existingByKey.get(`${onu.gponPort}-${onu.onuId}`);
-            return {
-              onuId: onu.onuId,
-              serialNumber: onu.serialNumber,
-              gponPort: onu.gponPort,
-              description: onu.description || existing?.description || "",
-              lineProfileId: onu.lineProfileId,
-              serviceProfileId: onu.serviceProfileId,
-              status: onu.status,
-              configState: onu.configState,
-              rxPower: onu.rxPower ?? existing?.rxPower ?? null,
-              txPower: onu.txPower ?? existing?.txPower ?? null,
-              distance: onu.distance ?? existing?.distance ?? null,
-              vlanId: onu.vlanId ?? existing?.vlanId ?? null,
-              gemportId: onu.gemportId ?? existing?.gemportId ?? null,
-              pppoeUsername: onu.pppoeUsername || existing?.pppoeUsername || null,
-              pppoePassword: existing?.pppoePassword || null, // Password can only come from DB, not OLT
-              wifiSsid: onu.wifiSsid ?? existing?.wifiSsid ?? null, // Use OLT value if available (customer may have changed)
-              wifiPassword: onu.wifiPassword ?? existing?.wifiPassword ?? null, // Use OLT value if available
-              oltCredentialId: credential.id,
-              boundAt: existing?.boundAt || new Date(onu.boundAt),
-            };
-          })
-        );
+        if (sshOnu && sshOnu.gponPort === dbOnu.gponPort && sshOnu.onuId === dbOnu.onuId) {
+          // MATCH: Same SN at same position - UPDATE only volatile fields (status, rx/tx, wifi)
+          console.log(`[Storage] MATCH: ${dbOnu.serialNumber} at ${dbOnu.gponPort}/${dbOnu.onuId} - updating status/signal/wifi only`);
+          await db.update(boundOnus)
+            .set({
+              status: sshOnu.status,
+              configState: sshOnu.configState,
+              rxPower: sshOnu.rxPower ?? dbOnu.rxPower,
+              txPower: sshOnu.txPower ?? dbOnu.txPower,
+              distance: sshOnu.distance ?? dbOnu.distance,
+              // Only update WiFi if SSH returned new values (customer may have changed)
+              wifiSsid: sshOnu.wifiSsid || dbOnu.wifiSsid,
+              wifiPassword: sshOnu.wifiPassword || dbOnu.wifiPassword,
+              // Update description only if SSH has one and DB is empty
+              description: dbOnu.description || sshOnu.description || "",
+            })
+            .where(eq(boundOnus.id, dbOnu.id));
+          updated++;
+        } else if (sshOnu) {
+          // SN exists but at different position - UPDATE position and volatile fields
+          console.log(`[Storage] MOVED: ${dbOnu.serialNumber} moved from ${dbOnu.gponPort}/${dbOnu.onuId} to ${sshOnu.gponPort}/${sshOnu.onuId}`);
+          await db.update(boundOnus)
+            .set({
+              gponPort: sshOnu.gponPort,
+              onuId: sshOnu.onuId,
+              status: sshOnu.status,
+              configState: sshOnu.configState,
+              rxPower: sshOnu.rxPower ?? dbOnu.rxPower,
+              txPower: sshOnu.txPower ?? dbOnu.txPower,
+              distance: sshOnu.distance ?? dbOnu.distance,
+              wifiSsid: sshOnu.wifiSsid || dbOnu.wifiSsid,
+              wifiPassword: sshOnu.wifiPassword || dbOnu.wifiPassword,
+              description: dbOnu.description || sshOnu.description || "",
+              lineProfileId: sshOnu.lineProfileId,
+              serviceProfileId: sshOnu.serviceProfileId,
+            })
+            .where(eq(boundOnus.id, dbOnu.id));
+          updated++;
+        } else {
+          // SN not in SSH list - DELETE from DB (ONU was unbound)
+          console.log(`[Storage] DELETE: ${dbOnu.serialNumber} not found in SSH - removing from DB`);
+          await db.delete(boundOnus).where(eq(boundOnus.id, dbOnu.id));
+          deleted++;
+        }
       }
       
-      console.log(`[Storage] Refreshed ${boundList.length} bound ONUs`);
-      return { success: true, message: `Found ${boundList.length} bound ONUs` };
+      // Step 2: Insert new ONUs from SSH that don't exist in DB
+      for (const sshOnu of sshList) {
+        if (!dbBySerial.has(sshOnu.serialNumber)) {
+          console.log(`[Storage] INSERT: New ONU ${sshOnu.serialNumber} at ${sshOnu.gponPort}/${sshOnu.onuId}`);
+          await db.insert(boundOnus).values({
+            onuId: sshOnu.onuId,
+            serialNumber: sshOnu.serialNumber,
+            gponPort: sshOnu.gponPort,
+            description: sshOnu.description || "",
+            lineProfileId: sshOnu.lineProfileId,
+            serviceProfileId: sshOnu.serviceProfileId,
+            status: sshOnu.status,
+            configState: sshOnu.configState,
+            rxPower: sshOnu.rxPower ?? null,
+            txPower: sshOnu.txPower ?? null,
+            distance: sshOnu.distance ?? null,
+            vlanId: sshOnu.vlanId ?? null,
+            gemportId: sshOnu.gemportId ?? null,
+            pppoeUsername: sshOnu.pppoeUsername || null,
+            pppoePassword: null,
+            wifiSsid: sshOnu.wifiSsid ?? null,
+            wifiPassword: sshOnu.wifiPassword ?? null,
+            oltCredentialId: credential.id,
+            boundAt: new Date(sshOnu.boundAt),
+          });
+          inserted++;
+        }
+      }
+      
+      console.log(`[Storage] Merge complete: ${updated} updated, ${inserted} inserted, ${deleted} deleted`);
+      return { success: true, message: `Synced: ${updated} updated, ${inserted} new, ${deleted} removed` };
     } catch (error: any) {
       console.error("[Storage] Error refreshing bound ONUs:", error);
       return { success: false, message: `Refresh failed: ${error.message}` };
