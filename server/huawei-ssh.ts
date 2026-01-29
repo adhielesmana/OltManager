@@ -1370,41 +1370,72 @@ export class HuaweiSSH {
     let foundCount = 0;
     
     for (const line of lines) {
-      // Format 1: ONT-ID only (common in interface mode)
-      // Example:    0  -5.47     2.37      -9.57       43           3.300    12       1
-      const match1 = line.match(/^\s*(\d+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)/);
+      // Huawei MA5801 optical info format (inside interface gpon mode):
+      // ONT-ID  Rx Power(dBm)  Tx Power(dBm)  OLT Rx ONT(dBm)  Laser Bias  Temperature  Voltage  Distance
+      // 0       -17.51         2.34           -18.92           12.00       45           3.30     1234
+      //
+      // We want: OLT Rx ONT (column 4) as rxPower (signal strength at OLT)
+      //          Tx Power (column 3) as txPower (ONU's transmit power)
+      
+      // Match line with ONT-ID followed by at least 4 numeric columns
+      // Pattern: ONT-ID  col1  col2  col3  col4...
+      const match1 = line.match(/^\s*(\d+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)/);
       
       if (match1) {
         const onuId = parseInt(match1[1]);
-        const rxPower = parseFloat(match1[2]);
-        const txPower = parseFloat(match1[3]);
+        // Column order: ONT-ID, Rx(ONU), Tx(ONU), OLT-Rx-ONT, ...
+        const onuRxPower = parseFloat(match1[2]);  // ONU's Rx (less useful)
+        const onuTxPower = parseFloat(match1[3]);  // ONU's Tx power
+        const oltRxPower = parseFloat(match1[4]);  // OLT receives from ONU (THIS IS WHAT WE WANT)
         
         // Find the ONU by ID (assumes we're in a specific port context)
         const onu = onus.find(o => o.onuId === onuId);
-        if (onu && !isNaN(rxPower)) {
-          onu.rxPower = rxPower;
-          onu.txPower = isNaN(txPower) ? undefined : txPower;
-          console.log(`[SSH] Enriched ONU ${onuId} with optical: rx=${rxPower}, tx=${txPower}`);
+        if (onu && !isNaN(oltRxPower)) {
+          // Use OLT Rx power as the main signal indicator
+          onu.rxPower = oltRxPower;
+          onu.txPower = isNaN(onuTxPower) ? undefined : onuTxPower;
+          console.log(`[SSH] Enriched ONU ${onuId}: oltRx=${oltRxPower}dBm, onuTx=${onuTxPower}dBm (onuRx=${onuRxPower}dBm)`);
           foundCount++;
         }
         continue;
       }
       
-      // Format 2: With F/S/P port format (may have spaces)
-      // Example: 0/ 1/0   0      -17.51         2.34           -17.89           1234
-      const match2 = line.match(/^\s*(\d+)\s*\/\s*(\d+)\s*\/\s*(\d+)\s+(\d+)\s+([\d.-]+)\s+([\d.-]+)/);
-      
+      // Fallback: Try to match with fewer columns (older format or different firmware)
+      // Example: 0  -17.51  2.34  -18.92
+      const match2 = line.match(/^\s*(\d+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)/);
       if (match2) {
-        const port = `${match2[1]}/${match2[2]}/${match2[3]}`;
-        const onuId = parseInt(match2[4]);
-        const rxPower = parseFloat(match2[5]);
-        const txPower = parseFloat(match2[6]);
+        const onuId = parseInt(match2[1]);
+        const col1 = parseFloat(match2[2]);
+        const col2 = parseFloat(match2[3]);
+        const col3 = parseFloat(match2[4]);
+        
+        const onu = onus.find(o => o.onuId === onuId);
+        if (onu && !isNaN(col3)) {
+          // Assume col3 is OLT Rx power
+          onu.rxPower = col3;
+          onu.txPower = isNaN(col2) ? undefined : col2;
+          console.log(`[SSH] Enriched ONU ${onuId} (fallback): rx=${col3}dBm, tx=${col2}dBm`);
+          foundCount++;
+        }
+        continue;
+      }
+      
+      // Format with F/S/P port format (may have spaces in port notation)
+      // Example: 0/ 1/15   0      -17.51         2.34           -17.89
+      const match3 = line.match(/^\s*(\d+)\s*\/\s*(\d+)\s*\/\s*(\d+)\s+(\d+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)/);
+      
+      if (match3) {
+        const port = `${match3[1]}/${match3[2]}/${match3[3]}`;
+        const onuId = parseInt(match3[4]);
+        const col1 = parseFloat(match3[5]);
+        const col2 = parseFloat(match3[6]);
+        const col3 = parseFloat(match3[7]);
         
         const onu = onus.find(o => o.gponPort === port && o.onuId === onuId);
         if (onu) {
-          onu.rxPower = isNaN(rxPower) ? undefined : rxPower;
-          onu.txPower = isNaN(txPower) ? undefined : txPower;
-          console.log(`[SSH] Enriched ONU ${port}/${onuId} with optical: rx=${rxPower}, tx=${txPower}`);
+          onu.rxPower = isNaN(col3) ? undefined : col3;  // OLT Rx power
+          onu.txPower = isNaN(col2) ? undefined : col2;  // ONU Tx power
+          console.log(`[SSH] Enriched ONU ${port}/${onuId}: rx=${col3}dBm, tx=${col2}dBm`);
           foundCount++;
         }
       }
