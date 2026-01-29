@@ -580,6 +580,7 @@ export async function registerRoutes(
       await storage.unbindOnu(
         parseResult.data.onuId,
         parseResult.data.gponPort,
+        parseResult.data.serialNumber,
         parseResult.data.cleanConfig
       );
       res.json({ success: true });

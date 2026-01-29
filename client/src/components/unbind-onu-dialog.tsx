@@ -36,6 +36,7 @@ export function UnbindOnuDialog({ open, onOpenChange, onu, onReload }: UnbindOnu
       const response = await apiRequest("POST", "/api/onu/unbind", {
         onuId: onu.onuId,
         gponPort: onu.gponPort,
+        serialNumber: onu.serialNumber,
         cleanConfig,
         force: false,
       });

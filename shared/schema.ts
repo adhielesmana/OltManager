@@ -344,6 +344,7 @@ export type BindOnuRequest = z.infer<typeof bindOnuRequestSchema>;
 export const unbindOnuRequestSchema = z.object({
   onuId: z.number(),
   gponPort: z.string(),
+  serialNumber: z.string(),
   cleanConfig: z.boolean().default(false),
   force: z.boolean().default(false),
 });

@@ -78,7 +78,7 @@ export interface IStorage {
   validateOnu(serialNumber: string): Promise<{ canBind: boolean; reason: string }>;
   verifyOnu(serialNumber: string): Promise<OnuVerification>;
   bindOnu(request: BindOnuRequest): Promise<BoundOnu>;
-  unbindOnu(onuId: number, gponPort: string, cleanConfig: boolean): Promise<void>;
+  unbindOnu(onuId: number, gponPort: string, serialNumber: string, cleanConfig: boolean): Promise<void>;
   getNextFreeOnuId(gponPort: string): Promise<number>;
 }
 
@@ -1430,7 +1430,7 @@ export class DatabaseStorage implements IStorage {
     return this.dbBoundToApi(newBoundOnu);
   }
 
-  async unbindOnu(onuId: number, gponPort: string, cleanConfig: boolean): Promise<void> {
+  async unbindOnu(onuId: number, gponPort: string, serialNumber: string, cleanConfig: boolean): Promise<void> {
     const credential = await this.getActiveOltCredential();
     if (!credential) {
       throw new Error("Not connected to OLT");
@@ -1447,14 +1447,13 @@ export class DatabaseStorage implements IStorage {
       throw new Error("ONU not found");
     }
     
-    // Execute SSH commands to unbind ONU on OLT device
-    const result = await huaweiSSH.unbindOnu(onuId, gponPort, cleanConfig);
+    // Execute SSH commands to unbind ONU on OLT device using serial number
+    const result = await huaweiSSH.unbindOnu(serialNumber, onuId, gponPort, cleanConfig);
     if (!result.success) {
       throw new Error(result.message);
     }
     
-    // Store ONU info before deleting from bound list
-    const serialNumber = onu.serialNumber;
+    // Use the serialNumber parameter passed to the function
     
     // Remove from bound list in database
     await db.delete(boundOnus)

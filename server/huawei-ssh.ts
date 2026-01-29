@@ -2021,7 +2021,7 @@ export class HuaweiSSH {
     }
   }
 
-  async unbindOnu(onuId: number, gponPort: string, cleanConfig: boolean): Promise<{ success: boolean; message: string }> {
+  async unbindOnu(serialNumber: string, onuId: number, gponPort: string, cleanConfig: boolean): Promise<{ success: boolean; message: string }> {
     if (!this.isConnected()) {
       return { success: false, message: "Not connected to OLT" };
     }
@@ -2041,7 +2041,7 @@ export class HuaweiSSH {
       }
       const [frame, slot, port] = portParts.map(p => parseInt(p));
 
-      console.log(`[SSH] Unbinding ONU ${onuId} from port ${gponPort}, cleanConfig=${cleanConfig}`);
+      console.log(`[SSH] Unbinding ONU ${serialNumber} from port ${gponPort}, cleanConfig=${cleanConfig}`);
       console.log(`[SSH] Parsed port parts: frame=${frame}, slot=${slot}, port=${port}`);
 
       // CORRECT HUAWEI UNBIND SEQUENCE (from official docs):
@@ -2119,8 +2119,8 @@ export class HuaweiSSH {
       const ifResult = await this.executeCommand("interface gpon " + String(frame) + "/" + String(slot));
       console.log(`[SSH] Interface result: ${ifResult.substring(0, 100)}`);
       
-      // Step 5: Delete the ONU using "undo ont" command
-      const deleteCmd = "undo ont " + String(port) + " " + String(onuId);
+      // Step 5: Delete the ONU using "ont delete by-sn" command
+      const deleteCmd = "ont delete by-sn " + serialNumber;
       console.log(`[SSH] Step 5: Deleting ONU with: ${deleteCmd}`);
       const deleteResult = await this.executeCommand(deleteCmd);
       console.log(`[SSH] Delete result: ${deleteResult}`);
