@@ -1081,6 +1081,7 @@ export class HuaweiSSH {
             
             // Get descriptions, PPPoE and WiFi config for each ONU (limit to first 50 to avoid timeout)
             const onusToEnrich = slotOnus.slice(0, 50);
+            console.log(`[SSH] Starting enrichment for ${onusToEnrich.length} ONUs on slot ${slot}`);
             for (const onu of onusToEnrich) {
               try {
                 const portParts = onu.gponPort.split("/");

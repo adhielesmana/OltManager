@@ -66,7 +66,8 @@ export default function BoundOnuPage() {
 
   const { data: boundOnus = [], isLoading, isFetching } = useQuery<BoundOnu[]>({
     queryKey: ["/api/onu/bound"],
-    refetchOnWindowFocus: false, // Don't refetch when switching tabs
+    refetchOnMount: "always", // Always refetch when navigating to this page
+    staleTime: 30000, // Consider data stale after 30 seconds
     placeholderData: keepPreviousData, // Keep previous data visible while refetching
   });
 

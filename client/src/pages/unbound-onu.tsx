@@ -30,7 +30,8 @@ export default function UnboundOnuPage() {
 
   const { data: unboundOnus = [], isLoading } = useQuery<UnboundOnu[]>({
     queryKey: ["/api/onu/unbound"],
-    refetchOnWindowFocus: false, // Don't refetch when switching tabs
+    refetchOnMount: "always", // Always refetch when navigating to this page
+    staleTime: 30000, // Consider data stale after 30 seconds
   });
 
   const { data: refreshStatus } = useQuery<{ lastRefreshed: string | null; inProgress: boolean; error: string | null }>({
