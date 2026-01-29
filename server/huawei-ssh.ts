@@ -1657,9 +1657,10 @@ export class HuaweiSSH {
         onuType = "huawei", wifiSsid, wifiPassword, enableRemoteAccess = true 
       } = params;
       
-      // Default WiFi credentials based on serial number (last 8 chars for uniqueness)
-      const defaultSsid = wifiSsid || `ONU_${serialNumber.slice(-8)}`;
-      const defaultPassword = wifiPassword || `wifi${serialNumber.slice(-8)}`;
+      // Default WiFi credentials - fixed names for all ONUs
+      const defaultSsid24 = wifiSsid || "MaxnetPlus";
+      const defaultSsid5G = "MaxnetPlus5G";
+      const defaultPassword = wifiPassword || "MaxnetWifi";
       
       // Parse port - format is "0/1/0" -> frame=0, slot=1, port=0
       const portParts = gponPort.split("/");
@@ -1777,21 +1778,32 @@ export class HuaweiSSH {
       }
 
       // Step 10: Configure WiFi SSID and Password for Huawei ONUs via OMCI
+      // Configure both 2.4GHz (ssid-index 0) and 5GHz (ssid-index 1)
       if (!isGeneral) {
-        console.log(`[SSH] Step 10: Configuring WiFi SSID="${defaultSsid}" Password="${defaultPassword}"...`);
+        console.log(`[SSH] Step 10: Configuring WiFi 2.4GHz="${defaultSsid24}" 5GHz="${defaultSsid5G}" Password="${defaultPassword}"...`);
         try {
           // Enter GPON interface first
           await this.executeCommand("interface gpon " + String(frame) + "/" + String(slot));
           await this.delay(500);
           
-          // Configure WiFi via ont wlan-cfg command
+          // Configure 2.4GHz WiFi (ssid-index 0)
           // Format: ont wlan-cfg PORT ONU_ID ssid-index 0 ssid-name SSID authentication-mode wpa2-psk psk-password PASSWORD
-          const wifiCmd = "ont wlan-cfg " + slotPort + 
-            " ssid-index 0 ssid-name " + defaultSsid + 
+          const wifi24Cmd = "ont wlan-cfg " + slotPort + 
+            " ssid-index 0 ssid-name " + defaultSsid24 + 
             " authentication-mode wpa2-psk psk-password " + defaultPassword;
-          console.log(`[SSH] WiFi config command: ont wlan-cfg ${slotPort} ssid-index 0 ssid-name ${defaultSsid} authentication-mode wpa2-psk psk-password ****`);
-          const wifiResult = await this.executeCommand(wifiCmd);
-          console.log(`[SSH] WiFi config result: ${wifiResult.substring(0, 200)}`);
+          console.log(`[SSH] 2.4GHz WiFi: ont wlan-cfg ${slotPort} ssid-index 0 ssid-name ${defaultSsid24} authentication-mode wpa2-psk psk-password ****`);
+          const wifi24Result = await this.executeCommand(wifi24Cmd);
+          console.log(`[SSH] 2.4GHz WiFi result: ${wifi24Result.substring(0, 200)}`);
+          
+          await this.delay(500);
+          
+          // Configure 5GHz WiFi (ssid-index 1)
+          const wifi5GCmd = "ont wlan-cfg " + slotPort + 
+            " ssid-index 1 ssid-name " + defaultSsid5G + 
+            " authentication-mode wpa2-psk psk-password " + defaultPassword;
+          console.log(`[SSH] 5GHz WiFi: ont wlan-cfg ${slotPort} ssid-index 1 ssid-name ${defaultSsid5G} authentication-mode wpa2-psk psk-password ****`);
+          const wifi5GResult = await this.executeCommand(wifi5GCmd);
+          console.log(`[SSH] 5GHz WiFi result: ${wifi5GResult.substring(0, 200)}`);
           
           // Exit interface for next step
           await this.executeCommand("quit");
@@ -1853,11 +1865,11 @@ export class HuaweiSSH {
       }
 
       console.log(`[SSH] Successfully bound ONU ${serialNumber} as ID ${onuId} on ${gponPort}`);
-      const wifiInfo = !isGeneral ? ` | WiFi SSID: ${defaultSsid} | Password: ${defaultPassword}` : "";
+      const wifiInfo = !isGeneral ? ` | WiFi: ${defaultSsid24} / ${defaultSsid5G} | Password: ${defaultPassword}` : "";
       return { 
         success: true, 
         message: `ONU bound successfully as ID ${onuId}${!isGeneral ? " - WiFi will be ready in ~60 seconds" : ""}${wifiInfo}`,
-        wifiSsid: !isGeneral ? defaultSsid : undefined,
+        wifiSsid: !isGeneral ? `${defaultSsid24} / ${defaultSsid5G}` : undefined,
         wifiPassword: !isGeneral ? defaultPassword : undefined
       };
 
