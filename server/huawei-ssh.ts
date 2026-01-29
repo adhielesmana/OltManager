@@ -8,10 +8,15 @@ export interface HuaweiSSHConfig {
   password: string;
 }
 
+// Connection status for UI display
+export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "failed";
+
 export class HuaweiSSH {
   private client: Client | null = null;
   private config: HuaweiSSHConfig | null = null;
   private connected: boolean = false;
+  private connectionStatus: ConnectionStatus = "disconnected";
+  private lastConnectionError: string = "";
   private shell: ClientChannel | null = null;
   private commandQueue: Array<{
     command: string;
@@ -63,15 +68,22 @@ export class HuaweiSSH {
     return new Promise((resolve) => {
       this.config = config;
       this.client = new Client();
+      this.connectionStatus = "connecting";
+      this.lastConnectionError = "";
+      console.log(`[SSH] Initiating connection to ${config.host}...`);
 
       const timeout = setTimeout(() => {
         this.client?.end();
+        this.connectionStatus = "failed";
+        this.lastConnectionError = "Connection timeout";
         resolve({ success: false, message: "Connection timeout" });
       }, 30000);
 
       this.client.on("ready", async () => {
         clearTimeout(timeout);
         this.connected = true;
+        this.connectionStatus = "connected";
+        this.lastConnectionError = "";
         console.log(`[SSH] Connected to OLT at ${config.host}`);
         
         // Open persistent shell
@@ -79,6 +91,8 @@ export class HuaweiSSH {
           await this.openShell();
           resolve({ success: true, message: "Connected to OLT successfully" });
         } catch (err: any) {
+          this.connectionStatus = "failed";
+          this.lastConnectionError = err.message;
           resolve({ success: false, message: `Failed to open shell: ${err.message}` });
         }
       });
@@ -86,12 +100,15 @@ export class HuaweiSSH {
       this.client.on("error", (err) => {
         clearTimeout(timeout);
         this.connected = false;
+        this.connectionStatus = "failed";
+        this.lastConnectionError = err.message;
         console.error(`[SSH] Connection error: ${err.message}`);
         resolve({ success: false, message: `Connection failed: ${err.message}` });
       });
 
       this.client.on("close", () => {
         this.connected = false;
+        this.connectionStatus = "disconnected";
         this.shell = null;
         console.log("[SSH] Connection closed");
       });
@@ -269,13 +286,30 @@ export class HuaweiSSH {
       this.client = null;
     }
     this.connected = false;
+    this.connectionStatus = "disconnected";
     this.commandQueue = [];
     this.isExecuting = false;
     this.cachedGponPorts = []; // Clear cached ports on disconnect
+    console.log("[SSH] Disconnected from OLT");
   }
 
   isConnected(): boolean {
     return this.connected && this.shell !== null;
+  }
+
+  // Get connection status for UI display
+  getConnectionStatus(): ConnectionStatus {
+    return this.connectionStatus;
+  }
+
+  // Get last connection error message
+  getLastError(): string {
+    return this.lastConnectionError;
+  }
+
+  // Check if connection is in progress (connecting)
+  isConnecting(): boolean {
+    return this.connectionStatus === "connecting";
   }
 
   async executeCommand(command: string): Promise<string> {

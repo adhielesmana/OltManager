@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "./db";
 import {
   users,
@@ -284,6 +284,22 @@ export class DatabaseStorage implements IStorage {
 
   async deleteSession(sessionId: string): Promise<void> {
     await db.delete(sessions).where(eq(sessions.id, sessionId));
+    
+    // Check if there are any remaining active sessions
+    // If no active sessions, disconnect SSH to save resources
+    const remainingSessions = await this.getActiveSessionCount();
+    if (remainingSessions === 0) {
+      console.log("[Storage] No active sessions remaining, disconnecting SSH...");
+      if (huaweiSSH.isConnected()) {
+        huaweiSSH.disconnect();
+      }
+    }
+  }
+
+  async getActiveSessionCount(): Promise<number> {
+    const now = new Date();
+    const result = await db.select().from(sessions).where(sql`${sessions.expiresAt} > ${now}`);
+    return result.length;
   }
 
   // User management
