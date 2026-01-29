@@ -25,6 +25,12 @@ interface OltCredential {
   lastConnected: string | null;
 }
 
+interface OltInfo {
+  product: string;
+  connected: boolean;
+  connectionStatus?: "disconnected" | "connecting" | "connected" | "failed";
+}
+
 export default function OltSettingsPage() {
   const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -40,6 +46,43 @@ export default function OltSettingsPage() {
   const { data: credentials, isLoading } = useQuery<OltCredential[]>({
     queryKey: ["/api/olt/credentials"],
   });
+
+  const { data: oltInfo } = useQuery<OltInfo>({
+    queryKey: ["/api/olt/info"],
+    refetchInterval: 5000, // Refetch every 5s to get updated connection status
+  });
+
+  const connectionStatus = oltInfo?.connectionStatus ?? "disconnected";
+
+  // Helper to render connection badge
+  const renderConnectionBadge = (isConnected: boolean) => {
+    if (isConnected || connectionStatus === "connected") {
+      return (
+        <Badge className="bg-green-500">
+          <Wifi className="mr-1 h-3 w-3" /> Connected
+        </Badge>
+      );
+    }
+    if (connectionStatus === "connecting") {
+      return (
+        <Badge className="bg-blue-500">
+          <Wifi className="mr-1 h-3 w-3 animate-pulse" /> Initializing...
+        </Badge>
+      );
+    }
+    if (connectionStatus === "failed") {
+      return (
+        <Badge variant="destructive">
+          <WifiOff className="mr-1 h-3 w-3" /> Failed
+        </Badge>
+      );
+    }
+    return (
+      <Badge variant="secondary">
+        <WifiOff className="mr-1 h-3 w-3" /> Disconnected
+      </Badge>
+    );
+  };
 
   const createMutation = useMutation({
     mutationFn: async (data: { name: string; host: string; port: number; username: string; password: string; protocol: string }) => {
@@ -273,19 +316,13 @@ export default function OltSettingsPage() {
       </div>
 
       {activeCredential && (
-        <Card className={activeCredential.isConnected ? "border-green-500" : "border-orange-500"}>
+        <Card className={activeCredential.isConnected ? "border-green-500" : connectionStatus === "connecting" ? "border-blue-500" : "border-orange-500"}>
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
             <div className="flex items-center gap-2">
               <Server className="h-5 w-5" />
               <CardTitle>Active Connection</CardTitle>
             </div>
-            <Badge variant={activeCredential.isConnected ? "default" : "secondary"} className={activeCredential.isConnected ? "bg-green-500" : ""}>
-              {activeCredential.isConnected ? (
-                <><Wifi className="mr-1 h-3 w-3" /> Connected</>
-              ) : (
-                <><WifiOff className="mr-1 h-3 w-3" /> Disconnected</>
-              )}
-            </Badge>
+            {renderConnectionBadge(activeCredential.isConnected)}
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -367,10 +404,10 @@ export default function OltSettingsPage() {
                     <TableCell className="font-mono">{cred.host}:{cred.port}</TableCell>
                     <TableCell className="uppercase">{cred.protocol}</TableCell>
                     <TableCell>
-                      {cred.isConnected ? (
-                        <Badge className="bg-green-500">Connected</Badge>
+                      {cred.isActive ? (
+                        renderConnectionBadge(cred.isConnected)
                       ) : (
-                        <Badge variant="secondary">Disconnected</Badge>
+                        <Badge variant="secondary">Inactive</Badge>
                       )}
                     </TableCell>
                     <TableCell>

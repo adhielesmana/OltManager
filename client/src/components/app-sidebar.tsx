@@ -91,6 +91,42 @@ export function AppSidebar() {
   });
 
   const isConnected = oltInfo?.connected ?? false;
+  const connectionStatus = oltInfo?.connectionStatus ?? "disconnected";
+
+  // Render connection status badge
+  const renderConnectionStatus = () => {
+    if (isConnected || connectionStatus === "connected") {
+      return (
+        <>
+          <Wifi className="h-3.5 w-3.5 text-green-500" />
+          <span className="text-green-600 dark:text-green-400 font-medium">Connected</span>
+        </>
+      );
+    }
+    if (connectionStatus === "connecting") {
+      return (
+        <>
+          <Wifi className="h-3.5 w-3.5 text-blue-500 animate-pulse" />
+          <span className="text-blue-600 dark:text-blue-400">Initializing connection...</span>
+        </>
+      );
+    }
+    if (connectionStatus === "failed") {
+      return (
+        <>
+          <WifiOff className="h-3.5 w-3.5 text-red-500" />
+          <span className="text-red-600 dark:text-red-400">Connection failed</span>
+        </>
+      );
+    }
+    // disconnected
+    return (
+      <>
+        <WifiOff className="h-3.5 w-3.5 text-orange-500" />
+        <span className="text-orange-600 dark:text-orange-400">Disconnected</span>
+      </>
+    );
+  };
 
   return (
     <Sidebar>
@@ -186,17 +222,7 @@ export function AppSidebar() {
       <SidebarFooter className="border-t border-sidebar-border p-4">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2 text-xs">
-            {isConnected ? (
-              <>
-                <Wifi className="h-3.5 w-3.5 text-green-500" />
-                <span className="text-green-600 dark:text-green-400 font-medium">Connected</span>
-              </>
-            ) : (
-              <>
-                <WifiOff className="h-3.5 w-3.5 text-orange-500" />
-                <span className="text-orange-600 dark:text-orange-400">Disconnected</span>
-              </>
-            )}
+            {renderConnectionStatus()}
           </div>
           {oltInfo && isConnected && (
             <div className="flex flex-col gap-1 text-xs">

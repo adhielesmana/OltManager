@@ -718,8 +718,66 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  // Get SSH connection status for UI
+  getConnectionStatus(): { status: string; error: string } {
+    return {
+      status: huaweiSSH.getConnectionStatus(),
+      error: huaweiSSH.getLastError(),
+    };
+  }
+
+  // Auto-reconnect to OLT if not connected (non-blocking)
+  private autoReconnectPromise: Promise<void> | null = null;
+  
+  async ensureConnected(): Promise<boolean> {
+    // Already connected
+    if (huaweiSSH.isConnected()) {
+      return true;
+    }
+    
+    // Already connecting - wait for it
+    if (huaweiSSH.isConnecting()) {
+      // Wait up to 35 seconds for connection
+      for (let i = 0; i < 70; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        if (huaweiSSH.isConnected()) return true;
+        if (!huaweiSSH.isConnecting()) break;
+      }
+      return huaweiSSH.isConnected();
+    }
+    
+    // Try to auto-reconnect
+    const credential = await this.getActiveOltCredential();
+    if (!credential) return false;
+    
+    console.log("[Storage] Auto-reconnecting to OLT...");
+    try {
+      const password = decryptOltPassword(credential.passwordEncrypted);
+      const result = await huaweiSSH.connect({
+        host: credential.host,
+        port: credential.port,
+        username: credential.username,
+        password,
+      });
+      
+      if (result.success) {
+        console.log("[Storage] Auto-reconnect successful");
+        await db.update(oltCredentials)
+          .set({ isConnected: true, lastConnected: new Date() })
+          .where(eq(oltCredentials.id, credential.id));
+        return true;
+      } else {
+        console.log(`[Storage] Auto-reconnect failed: ${result.message}`);
+        return false;
+      }
+    } catch (error: any) {
+      console.log(`[Storage] Auto-reconnect error: ${error.message}`);
+      return false;
+    }
+  }
+
   // OLT data operations - now read from database
-  async getOltInfo(): Promise<OltInfo> {
+  async getOltInfo(): Promise<OltInfo & { connectionStatus?: string }> {
     const credential = await this.getActiveOltCredential();
     if (!credential) {
       return {
@@ -728,24 +786,57 @@ export class DatabaseStorage implements IStorage {
         patch: "-",
         uptime: "-",
         connected: false,
+        connectionStatus: "disconnected",
+      };
+    }
+
+    // Get connection status
+    const connStatus = huaweiSSH.getConnectionStatus();
+    
+    // If connecting, return initializing status
+    if (connStatus === "connecting") {
+      return {
+        product: credential.name,
+        version: "-",
+        patch: "-",
+        uptime: "-",
+        connected: false,
+        connectionStatus: "connecting",
       };
     }
 
     // If SSH is connected, get real OLT info
     if (huaweiSSH.isConnected()) {
       try {
-        return await huaweiSSH.getOltInfo();
+        const info = await huaweiSSH.getOltInfo();
+        return { ...info, connectionStatus: "connected" };
       } catch {
         // Fall through to return disconnected state
       }
     }
+    
+    // If disconnected but have credential, try auto-reconnect in background
+    if (connStatus === "disconnected") {
+      // Start auto-reconnect (non-blocking)
+      this.ensureConnected().catch(() => {});
+      return {
+        product: credential.name,
+        version: "-",
+        patch: "-",
+        uptime: "-",
+        connected: false,
+        connectionStatus: "connecting", // Show as connecting since we're attempting
+      };
+    }
 
+    // Failed state
     return {
       product: credential.name,
       version: "-",
       patch: "-",
       uptime: "-",
       connected: false,
+      connectionStatus: connStatus,
     };
   }
 

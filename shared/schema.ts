@@ -355,6 +355,7 @@ export const oltInfoSchema = z.object({
   hostname: z.string().optional(),
   model: z.string().optional(),
   serialNumber: z.string().optional(),
+  connectionStatus: z.enum(["disconnected", "connecting", "connected", "failed"]).optional(),
 });
 export type OltInfo = z.infer<typeof oltInfoSchema>;
 
