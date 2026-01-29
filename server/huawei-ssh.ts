@@ -522,10 +522,31 @@ export class HuaweiSSH {
     try {
       const output = await this.executeCommand("display version");
       
-      const productMatch = output.match(/MA\d+[A-Z0-9-]+/i);
-      const versionMatch = output.match(/V\d+R\d+C\d+/i);
-      const patchMatch = output.match(/SPC\d+/i);
-      const uptimeMatch = output.match(/uptime is ([^\n]+)/i) || output.match(/Run time:([^\n]+)/i);
+      // Parse "display version" output format:
+      // VERSION : MA5801V100R022C10
+      // PATCH   : SPH209
+      // PRODUCT : MA5801-GP16-H2
+      // Uptime is 10 day(s), 6 hour(s), 40 minute(s), 20 second(s)
+      
+      // Extract PRODUCT line: "PRODUCT : MA5801-GP16-H2"
+      const productLineMatch = output.match(/PRODUCT\s*:\s*([^\n\r]+)/i);
+      const product = productLineMatch ? productLineMatch[1].trim() : null;
+      
+      // Extract VERSION line and parse version number: "VERSION : MA5801V100R022C10"
+      const versionLineMatch = output.match(/VERSION\s*:\s*([^\n\r]+)/i);
+      let version = null;
+      if (versionLineMatch) {
+        // Extract V100R022C10 from MA5801V100R022C10
+        const vMatch = versionLineMatch[1].match(/V\d+R\d+C\d+/i);
+        version = vMatch ? vMatch[0] : versionLineMatch[1].trim();
+      }
+      
+      // Extract PATCH line: "PATCH   : SPH209" (can be SPH, SPC, or other prefixes)
+      const patchLineMatch = output.match(/PATCH\s*:\s*([^\n\r]+)/i);
+      const patch = patchLineMatch ? patchLineMatch[1].trim() : null;
+      
+      // Extract uptime: "Uptime is 10 day(s), 6 hour(s), 40 minute(s), 20 second(s)"
+      const uptimeMatch = output.match(/uptime is ([^\n\r]+)/i) || output.match(/Run time:([^\n\r]+)/i);
       
       // Get sysname/hostname from command output or prompt
       let hostname = "";
@@ -566,13 +587,13 @@ export class HuaweiSSH {
       }
 
       return {
-        product: productMatch ? productMatch[0] : "MA5801",
-        version: versionMatch ? versionMatch[0] : "Unknown",
-        patch: patchMatch ? patchMatch[0] : "-",
+        product: product || "MA5801",
+        version: version || "Unknown",
+        patch: patch || "-",
         uptime: uptimeMatch ? uptimeMatch[1].trim() : "Unknown",
         connected: true,
         hostname: hostname || undefined,
-        model: productMatch ? productMatch[0] : undefined,
+        model: product || undefined,
         serialNumber: serialNumber || undefined,
       };
     } catch (err) {
