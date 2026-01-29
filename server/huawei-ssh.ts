@@ -1098,8 +1098,6 @@ export class HuaweiSSH {
             }
           }
           
-          allOnus.push(...slotOnus);
-          
           // Exit interface
           await this.executeCommand("quit");
           
@@ -1113,6 +1111,9 @@ export class HuaweiSSH {
             console.log(`[SSH] Could not fetch service-port info for slot ${slot}`);
             try { await this.executeCommand("quit"); } catch {}
           }
+          
+          // Add enriched ONUs to final list AFTER all enrichment is complete
+          allOnus.push(...slotOnus);
         } catch (err) {
           console.error(`[SSH] Error scanning slot ${slot}:`, err);
           try { await this.executeCommand("quit"); } catch {}
