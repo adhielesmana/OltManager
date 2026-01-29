@@ -785,6 +785,69 @@ export class HuaweiSSH {
     }
   }
 
+  // Parse VLAN info from "display service-port gpon 0/slot" output and update ONUs
+  private parseServicePortVlans(onus: BoundOnu[], output: string, slot: number): void {
+    // Service port output format:
+    // INDEX  VLAN  VLAN ATTR  PORT TYPE  F/S/P    VPI  VCI  FLOW PARA  FLOW TYPE  RX      TX      STATE
+    // 0      100   common     gpon       0/1/0    -    0    1          -          -       -       up
+    // We need to match port F/S/P and ONT ID to find VLAN for each ONU
+    
+    const lines = output.split("\n");
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      
+      // Skip header lines and non-data lines
+      if (!trimmedLine || 
+          trimmedLine.startsWith("-") || 
+          trimmedLine.startsWith("INDEX") ||
+          trimmedLine.includes("Command:") ||
+          trimmedLine.includes("Total:")) {
+        continue;
+      }
+      
+      // Parse service port line - format varies but typically:
+      // INDEX VLAN ... F/S/P ... ONT ...
+      // Try to extract port (0/slot/port) and ont id and vlan
+      const parts = trimmedLine.split(/\s+/);
+      if (parts.length < 5) continue;
+      
+      // First field is index, second is VLAN
+      const vlanId = parseInt(parts[1]);
+      if (isNaN(vlanId) || vlanId <= 0) continue;
+      
+      // Find the port pattern (e.g., 0/1/0) and ont pattern in the line
+      const portMatch = trimmedLine.match(/0\/(\d+)\/(\d+)/);
+      const ontMatch = trimmedLine.match(/ont\s*(\d+)/i) || trimmedLine.match(/\s(\d+)\s+\d+\s+\d+\s+/);
+      
+      if (portMatch) {
+        const lineSlot = parseInt(portMatch[1]);
+        const linePort = parseInt(portMatch[2]);
+        
+        if (lineSlot === slot) {
+          // Try to find ONT ID - look for number after port
+          let ontId = -1;
+          
+          // Look for "ont X" pattern or number after port
+          const ontIdMatch = trimmedLine.match(/ont\s+(\d+)/i);
+          if (ontIdMatch) {
+            ontId = parseInt(ontIdMatch[1]);
+          }
+          
+          if (ontId >= 0) {
+            // Find matching ONU and update VLAN
+            const matchingOnu = onus.find(o => 
+              o.gponPort === `0/${lineSlot}/${linePort}` && o.onuId === ontId
+            );
+            if (matchingOnu && !matchingOnu.vlanId) {
+              matchingOnu.vlanId = vlanId;
+              console.log(`[SSH] Found VLAN ${vlanId} for ONU ${matchingOnu.onuId} on port ${matchingOnu.gponPort}`);
+            }
+          }
+        }
+      }
+    }
+  }
+
   async getUnboundOnus(): Promise<UnboundOnu[]> {
     try {
       const allUnbound: UnboundOnu[] = [];
@@ -1039,6 +1102,17 @@ export class HuaweiSSH {
           
           // Exit interface
           await this.executeCommand("quit");
+          
+          // Fetch VLAN info from service-port for all ONUs on this slot
+          try {
+            await this.executeCommand("config");
+            const spOutput = await this.executeCommand(`display service-port gpon 0/${slot}`);
+            this.parseServicePortVlans(slotOnus, spOutput, slot);
+            await this.executeCommand("quit");
+          } catch (spErr) {
+            console.log(`[SSH] Could not fetch service-port info for slot ${slot}`);
+            try { await this.executeCommand("quit"); } catch {}
+          }
         } catch (err) {
           console.error(`[SSH] Error scanning slot ${slot}:`, err);
           try { await this.executeCommand("quit"); } catch {}
