@@ -773,6 +773,11 @@ export class DatabaseStorage implements IStorage {
       await db.delete(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id));
       
       if (boundList.length > 0) {
+        // Log what we're about to save
+        boundList.forEach(onu => {
+          console.log(`[Storage] Saving ONU ${onu.gponPort}/${onu.onuId}: desc="${onu.description}", rxPower=${onu.rxPower}, status=${onu.status}`);
+        });
+        
         await db.insert(boundOnus).values(
           boundList.map(onu => {
             // Preserve PPPoE info from existing record if available
