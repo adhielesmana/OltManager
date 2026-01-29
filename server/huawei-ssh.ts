@@ -1897,13 +1897,13 @@ export class HuaweiSSH {
 
       // Step 9: Create service-port to map VLAN (CRITICAL for VLAN passthrough)
       // This is required for both PPPoE and bridge mode
-      // Format: service-port vlan [VLAN] gpon [F/S/P] ont [ONU_ID] gemport [GEMPORT] multi-service user-vlan [VLAN] tag-transform translate
+      // Format: service-port vlan [VLAN] gpon [F/S/P] ont [ONU_ID] gemport [GEMPORT] multi-service user-vlan [VLAN] tag-transform transparent
       console.log(`[SSH] Step 9: Creating service-port for VLAN ${vlanId} with gemport ${gemportId}...`);
       const servicePortCmd = "service-port vlan " + String(vlanId) + 
         " gpon " + gponPort + 
         " ont " + String(onuId) + 
         " gemport " + String(gemportId) + " multi-service user-vlan " + String(vlanId) + 
-        " tag-transform translate";
+        " tag-transform transparent";
       console.log(`[SSH] Service-port command: ${servicePortCmd}`);
       const servicePortResult = await this.executeCommand(servicePortCmd);
       console.log(`[SSH] Service-port full result:\n${servicePortResult}`);
