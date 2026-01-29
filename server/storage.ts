@@ -616,120 +616,61 @@ export class DatabaseStorage implements IStorage {
     this.refreshLock = new Promise(resolve => { unlock = resolve; });
     
     try {
-      console.log("[Storage] Refreshing OLT data from device...");
+      console.log("[Storage] Refreshing all OLT data using component methods...");
       
-      // Fetch VLANs first as they might be cached from initial connection
-      const fetchedVlans = await huaweiSSH.getVlans();
+      // Use individual refresh methods to avoid duplicate data
+      // Each method handles its own database operations
       
-      // Fetch all ONU data using unified method
-      const { unbound, bound } = await huaweiSSH.getAllOnuData();
+      // Refresh unbound ONUs
+      const unboundResult = await this.refreshUnboundOnus();
+      console.log(`[Storage] Unbound refresh: ${unboundResult.message}`);
       
-      // Fetch profiles
-      const fetchedLineProfiles = await huaweiSSH.getLineProfiles();
-      const fetchedServiceProfiles = await huaweiSSH.getServiceProfiles();
+      // Refresh bound ONUs (this preserves existing PPPoE/WiFi data)
+      const boundResult = await this.refreshBoundOnus();
+      console.log(`[Storage] Bound refresh: ${boundResult.message}`);
       
-      // Save to database - clear old data first
-      await db.delete(unboundOnus).where(eq(unboundOnus.oltCredentialId, credential.id));
-      await db.delete(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id));
-      await db.delete(lineProfiles).where(eq(lineProfiles.oltCredentialId, credential.id));
-      await db.delete(serviceProfiles).where(eq(serviceProfiles.oltCredentialId, credential.id));
-      await db.delete(vlans).where(eq(vlans.oltCredentialId, credential.id));
+      // Refresh profiles
+      const profilesResult = await this.refreshProfiles();
+      console.log(`[Storage] Profiles refresh: ${profilesResult.message}`);
       
-      // Insert unbound ONUs
-      if (unbound.length > 0) {
-        await db.insert(unboundOnus).values(
-          unbound.map(onu => ({
-            serialNumber: onu.serialNumber,
-            gponPort: onu.gponPort,
-            discoveredAt: new Date(onu.discoveredAt),
-            equipmentId: onu.equipmentId || null,
-            softwareVersion: onu.softwareVersion || null,
-            oltCredentialId: credential.id,
-          }))
-        );
-      }
+      // Refresh VLANs
+      const vlansResult = await this.refreshVlans();
+      console.log(`[Storage] VLANs refresh: ${vlansResult.message}`);
       
-      // Insert bound ONUs
-      if (bound.length > 0) {
-        // Debug: log rxPower before saving
-        bound.forEach(o => console.log(`[Storage] ONU ${o.serialNumber} rxPower=${o.rxPower}, txPower=${o.txPower}, desc="${o.description}"`));
-        
-        await db.insert(boundOnus).values(
-          bound.map(onu => ({
-            onuId: onu.onuId,
-            serialNumber: onu.serialNumber,
-            gponPort: onu.gponPort,
-            description: onu.description || "",
-            lineProfileId: onu.lineProfileId,
-            serviceProfileId: onu.serviceProfileId,
-            status: onu.status,
-            configState: onu.configState,
-            rxPower: onu.rxPower ?? null,
-            txPower: onu.txPower ?? null,
-            distance: onu.distance ?? null,
-            vlanId: onu.vlanId ?? null,
-            gemportId: onu.gemportId ?? null,
-            oltCredentialId: credential.id,
-            boundAt: new Date(onu.boundAt),
-          }))
-        );
-      }
+      // Get counts for summary
+      const unboundCount = (await db.select().from(unboundOnus).where(eq(unboundOnus.oltCredentialId, credential.id))).length;
+      const boundCount = (await db.select().from(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id))).length;
+      const lineCount = (await db.select().from(lineProfiles).where(eq(lineProfiles.oltCredentialId, credential.id))).length;
+      const serviceCount = (await db.select().from(serviceProfiles).where(eq(serviceProfiles.oltCredentialId, credential.id))).length;
+      const vlanCount = (await db.select().from(vlans).where(eq(vlans.oltCredentialId, credential.id))).length;
       
-      // Insert line profiles
-      if (fetchedLineProfiles.length > 0) {
-        await db.insert(lineProfiles).values(
-          fetchedLineProfiles.map(p => ({
-            profileId: p.id,
-            name: p.name,
-            description: p.description || "",
-            tcont: p.tcont || 0,
-            gemportId: p.gemportId || 0,
-            mappingMode: p.mappingMode || "",
-            oltCredentialId: credential.id,
-          }))
-        );
-      }
-      
-      // Insert service profiles
-      if (fetchedServiceProfiles.length > 0) {
-        await db.insert(serviceProfiles).values(
-          fetchedServiceProfiles.map(p => ({
-            profileId: p.id,
-            name: p.name,
-            description: p.description || "",
-            portCount: p.portCount || 1,
-            portType: p.portType || "eth",
-            oltCredentialId: credential.id,
-          }))
-        );
-      }
-      
-      // Insert VLANs
-      if (fetchedVlans.length > 0) {
-        await db.insert(vlans).values(
-          fetchedVlans.map(v => ({
-            vlanId: v.id,
-            name: v.name,
-            description: v.description || "",
-            type: v.type,
-            tagged: v.tagged,
-            inUse: v.inUse,
-            oltCredentialId: credential.id,
-          }))
-        );
-      }
+      console.log(`[Storage] All data refreshed - Unbound: ${unboundCount}, Bound: ${boundCount}, Line: ${lineCount}, Service: ${serviceCount}, VLANs: ${vlanCount}`);
       
       // Update refresh tracking
       await db.update(oltDataRefresh)
         .set({ lastRefreshed: new Date(), refreshInProgress: false, lastError: null })
         .where(eq(oltDataRefresh.oltCredentialId, credential.id));
       
-      console.log(`[Storage] Saved to DB: ${unbound.length} unbound, ${bound.length} bound ONUs`);
-      console.log(`[Storage] Saved to DB: ${fetchedLineProfiles.length} line profiles, ${fetchedServiceProfiles.length} service profiles, ${fetchedVlans.length} VLANs`);
+      // Check if all succeeded
+      const allSuccess = unboundResult.success && boundResult.success && profilesResult.success && vlansResult.success;
+      
+      if (!allSuccess) {
+        const errors = [
+          !unboundResult.success && `Unbound: ${unboundResult.message}`,
+          !boundResult.success && `Bound: ${boundResult.message}`,
+          !profilesResult.success && `Profiles: ${profilesResult.message}`,
+          !vlansResult.success && `VLANs: ${vlansResult.message}`,
+        ].filter(Boolean).join("; ");
+        
+        return { 
+          success: false, 
+          message: `Partial refresh: ${errors}` 
+        };
+      }
       
       return { 
         success: true, 
-        message: `Refreshed: ${unbound.length} unbound, ${bound.length} bound ONUs, ${fetchedLineProfiles.length} profiles` 
+        message: `Refreshed: ${unboundCount} unbound, ${boundCount} bound ONUs, ${lineCount} line profiles, ${serviceCount} service profiles, ${vlanCount} VLANs` 
       };
     } catch (error: any) {
       console.error("[Storage] Error refreshing OLT data:", error);
