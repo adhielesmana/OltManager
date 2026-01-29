@@ -798,8 +798,8 @@ export class DatabaseStorage implements IStorage {
               gemportId: onu.gemportId ?? existing?.gemportId ?? null,
               pppoeUsername: onu.pppoeUsername || existing?.pppoeUsername || null,
               pppoePassword: existing?.pppoePassword || null, // Password can only come from DB, not OLT
-              wifiSsid: onu.wifiSsid || existing?.wifiSsid || null,
-              wifiPassword: onu.wifiPassword || existing?.wifiPassword || null,
+              wifiSsid: onu.wifiSsid ?? existing?.wifiSsid ?? null, // Use OLT value if available (customer may have changed)
+              wifiPassword: onu.wifiPassword ?? existing?.wifiPassword ?? null, // Use OLT value if available
               oltCredentialId: credential.id,
               boundAt: existing?.boundAt || new Date(onu.boundAt),
             };

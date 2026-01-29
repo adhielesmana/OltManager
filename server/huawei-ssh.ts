@@ -757,31 +757,42 @@ export class HuaweiSSH {
   
   private parseWifiConfig(onu: BoundOnu, output: string): void {
     // Parse WiFi SSID and password from "display ont wlan-config" output
-    // Look for SSID and password/key patterns
+    // Always update with latest values from OLT (customer may have changed settings)
+    let foundSsid: string | null = null;
+    let foundPassword: string | null = null;
+    
     for (const line of output.split("\n")) {
       const trimmedLine = line.trim();
       
       // Match SSID: various formats
       // SSID: MyNetwork or ssid MyNetwork or SSID name: MyNetwork
       const ssidMatch = trimmedLine.match(/(?:SSID|ssid)\s*(?:name)?\s*[:\s]\s*(.+)/i);
-      if (ssidMatch && !onu.wifiSsid) {
+      if (ssidMatch && !foundSsid) {
         const ssid = ssidMatch[1].trim();
         if (ssid && ssid !== "-" && ssid.length > 0) {
-          onu.wifiSsid = ssid;
-          console.log(`[SSH] Found WiFi SSID for ONU ${onu.onuId}: "${onu.wifiSsid}"`);
+          foundSsid = ssid;
         }
       }
       
       // Match password/key: various formats  
       // WPA key: xxx or password: xxx or WPA-PSK key: xxx
       const passMatch = trimmedLine.match(/(?:WPA.*key|password|WPA-PSK|psk|key)\s*[:\s]\s*(\S+)/i);
-      if (passMatch && !onu.wifiPassword) {
+      if (passMatch && !foundPassword) {
         const pass = passMatch[1].trim();
         if (pass && pass !== "-" && pass.length > 0) {
-          onu.wifiPassword = pass;
-          console.log(`[SSH] Found WiFi password for ONU ${onu.onuId}`);
+          foundPassword = pass;
         }
       }
+    }
+    
+    // Always update with latest values from OLT (overwrite existing)
+    if (foundSsid) {
+      onu.wifiSsid = foundSsid;
+      console.log(`[SSH] WiFi SSID for ONU ${onu.onuId}: "${foundSsid}"`);
+    }
+    if (foundPassword) {
+      onu.wifiPassword = foundPassword;
+      console.log(`[SSH] WiFi password updated for ONU ${onu.onuId}`);
     }
   }
 
