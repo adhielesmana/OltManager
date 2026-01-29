@@ -2119,8 +2119,8 @@ export class HuaweiSSH {
       const ifResult = await this.executeCommand("interface gpon " + String(frame) + "/" + String(slot));
       console.log(`[SSH] Interface result: ${ifResult.substring(0, 100)}`);
       
-      // Step 5: Delete the ONU
-      const deleteCmd = "ont delete " + String(port) + " " + String(onuId);
+      // Step 5: Delete the ONU using "undo ont" command
+      const deleteCmd = "undo ont " + String(port) + " " + String(onuId);
       console.log(`[SSH] Step 5: Deleting ONU with: ${deleteCmd}`);
       const deleteResult = await this.executeCommand(deleteCmd);
       console.log(`[SSH] Delete result: ${deleteResult}`);
