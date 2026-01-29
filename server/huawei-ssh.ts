@@ -632,7 +632,7 @@ export class HuaweiSSH {
           console.log(`[SSH] Found ${unbound.length} unbound ONUs on slot ${slot}`);
           
           // Get bound ONUs for ALL ports on this slot
-          const boundOutput = await this.executeCommand("display ont info all all");
+          const boundOutput = await this.executeCommand("display ont info all");
           const bound = this.parseBoundOnus(boundOutput, `0/${slot}/0`);
           allBound.push(...bound);
           console.log(`[SSH] Found ${bound.length} bound ONUs on slot ${slot}`);
@@ -641,7 +641,7 @@ export class HuaweiSSH {
           if (bound.length > 0) {
             try {
               // Add delay to ensure shell buffer is clear after heavy display ont info command
-              const opticalOutput = await this.executeCommandWithDelay("display ont optical-info all all", 800);
+              const opticalOutput = await this.executeCommandWithDelay("display ont optical-info all", 800);
               this.enrichWithOpticalInfo(bound, opticalOutput);
             } catch (err) {
               console.log("[SSH] Could not get optical info:", err);
