@@ -556,6 +556,7 @@ export default function BoundOnuPage() {
         open={unbindDialogOpen}
         onOpenChange={setUnbindDialogOpen}
         onu={selectedOnu}
+        onReload={() => reloadMutation.mutate()}
       />
 
       <OnuVerificationDialog

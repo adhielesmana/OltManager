@@ -818,9 +818,15 @@ export class DatabaseStorage implements IStorage {
       console.log("[Storage] Refreshing bound ONUs from OLT...");
       const boundList = await huaweiSSH.getBoundOnus();
       
-      // Get existing bound ONUs to preserve PPPoE info
+      // Get existing bound ONUs to preserve PPPoE info and for comparison
       const existingOnus = await db.select().from(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id));
       const existingByKey = new Map(existingOnus.map(o => [`${o.gponPort}-${o.onuId}`, o]));
+      
+      // Only replace data if OLT returned results, otherwise keep existing data
+      if (boundList.length === 0 && existingOnus.length > 0) {
+        console.log(`[Storage] OLT returned 0 bound ONUs but we have ${existingOnus.length} in database - keeping existing data`);
+        return { success: true, message: `OLT returned no data, keeping ${existingOnus.length} existing ONUs` };
+      }
       
       // Clear old bound data and insert new
       await db.delete(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id));

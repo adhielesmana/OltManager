@@ -21,9 +21,10 @@ interface UnbindOnuDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onu: BoundOnu | null;
+  onReload?: () => void;
 }
 
-export function UnbindOnuDialog({ open, onOpenChange, onu }: UnbindOnuDialogProps) {
+export function UnbindOnuDialog({ open, onOpenChange, onu, onReload }: UnbindOnuDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [cleanConfig, setCleanConfig] = useState(false);
@@ -53,6 +54,10 @@ export function UnbindOnuDialog({ open, onOpenChange, onu }: UnbindOnuDialogProp
       onOpenChange(false);
       setCleanConfig(false);
       setConfirmDelete(false);
+      // Trigger reload from OLT after unbind completes
+      if (onReload) {
+        onReload();
+      }
     },
     onError: (error: Error) => {
       toast({
