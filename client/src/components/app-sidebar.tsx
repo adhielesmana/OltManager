@@ -130,8 +130,8 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="p-4 border-b border-sidebar-border">
-        <div className="flex items-center gap-3">
+      <SidebarHeader className="border-b border-sidebar-border">
+        <div className="flex items-center gap-3 p-4">
           <img src={huaweiLogo} alt="Huawei" className="h-10 w-auto" />
           <div className="flex flex-col">
             <span className="font-semibold text-sm">OLT Manager</span>
@@ -219,8 +219,8 @@ export function AppSidebar() {
         )}
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border p-4">
-        <div className="flex flex-col gap-2">
+      <SidebarFooter className="border-t border-sidebar-border">
+        <div className="flex flex-col gap-2 p-4">
           <div className="flex items-center gap-2 text-xs">
             {renderConnectionStatus()}
           </div>

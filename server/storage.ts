@@ -53,6 +53,7 @@ export interface IStorage {
   getUserById(id: number): Promise<User | null>;
   getUserByUsername(username: string): Promise<User | null>;
   createUser(user: InsertUser): Promise<User>;
+  updateUser(id: number, updates: { username?: string; password?: string; role?: string; email?: string | null }): Promise<void>;
   deleteUser(id: number): Promise<void>;
   
   // OLT credentials
@@ -320,6 +321,10 @@ export class DatabaseStorage implements IStorage {
   async createUser(insertUser: InsertUser): Promise<User> {
     const [user] = await db.insert(users).values(insertUser).returning();
     return user;
+  }
+
+  async updateUser(id: number, updates: { username?: string; password?: string; role?: string; email?: string | null }): Promise<void> {
+    await db.update(users).set(updates).where(eq(users.id, id));
   }
 
   async deleteUser(id: number): Promise<void> {

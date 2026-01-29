@@ -206,6 +206,61 @@ export async function registerRoutes(
     }
   });
 
+  // Update user (super_admin only)
+  app.patch("/api/users/:id", requireAuth, async (req, res) => {
+    try {
+      // Only super_admin can edit users
+      if (req.session!.role !== "super_admin") {
+        return res.status(403).json({ error: "Only super admin can modify users" });
+      }
+
+      const userId = parseInt(String(req.params.id));
+      const targetUser = await storage.getUserById(userId);
+      
+      if (!targetUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Cannot modify the hardcoded super admin's role
+      if (targetUser.username === "adhielesmana" && req.body.role && req.body.role !== "super_admin") {
+        return res.status(403).json({ error: "Cannot change role of the primary super admin" });
+      }
+
+      const updates: { username?: string; password?: string; role?: string; email?: string | null } = {};
+      
+      if (req.body.username && req.body.username !== targetUser.username) {
+        // Check if username is already taken
+        const existingUser = await storage.getUserByUsername(req.body.username);
+        if (existingUser) {
+          return res.status(400).json({ error: "Username already taken" });
+        }
+        updates.username = req.body.username;
+      }
+
+      if (req.body.password) {
+        updates.password = await hashPassword(req.body.password);
+      }
+
+      if (req.body.role) {
+        updates.role = req.body.role;
+      }
+
+      if (req.body.email !== undefined) {
+        updates.email = req.body.email || null;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No updates provided" });
+      }
+
+      await storage.updateUser(userId, updates);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Failed to update user:", error);
+      res.status(500).json({ error: "Failed to update user" });
+    }
+  });
+
   // ==================== OLT CREDENTIAL ROUTES ====================
   
   app.get("/api/olt/credentials", requireAuth, requirePermission("olt:view"), async (req, res) => {
