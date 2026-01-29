@@ -1087,6 +1087,8 @@ export class HuaweiSSH {
                 const portNum = parseInt(portParts[2]) || 0;
                 const detailOutput = await this.executeCommand(`display ont info ${portNum} ${onu.onuId}`);
                 this.parseOnuDescription(onu, detailOutput);
+                console.log(`[SSH] After parseOnuDescription: ONU ${onu.onuId} description="${onu.description || '(still empty)'}"`);
+
                 
                 // Get PPPoE config
                 try {
@@ -1121,6 +1123,11 @@ export class HuaweiSSH {
           } catch (spErr) {
             console.log(`[SSH] Could not fetch service-port info for slot ${slot}`);
             try { await this.executeCommand("quit"); } catch {}
+          }
+          
+          // Log enriched ONUs before adding to final list
+          for (const onu of slotOnus) {
+            console.log(`[SSH] Enriched ONU ${onu.gponPort}/${onu.onuId}: desc="${onu.description}", pppoe="${onu.pppoeUsername}"`);
           }
           
           // Add enriched ONUs to final list AFTER all enrichment is complete

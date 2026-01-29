@@ -773,9 +773,10 @@ export class DatabaseStorage implements IStorage {
       await db.delete(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id));
       
       if (boundList.length > 0) {
-        // Log what we're about to save
+        // Log what SSH returned (before any merging with existing)
+        console.log("[Storage] ===== ONU DATA FROM SSH =====");
         boundList.forEach(onu => {
-          console.log(`[Storage] Saving ONU ${onu.gponPort}/${onu.onuId}: desc="${onu.description}", rxPower=${onu.rxPower}, status=${onu.status}`);
+          console.log(`[Storage] SSH ONU ${onu.gponPort}/${onu.onuId}: desc="${onu.description || '(empty)'}", pppoe="${onu.pppoeUsername || '(none)'}", wifi="${onu.wifiSsid || '(none)'}"`);
         });
         
         await db.insert(boundOnus).values(
