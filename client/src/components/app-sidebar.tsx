@@ -89,6 +89,7 @@ export function AppSidebar() {
     queryKey: ["/api/onu/unbound/count"],
     enabled: !!user,
     refetchInterval: 5000, // Poll every 5 seconds for real-time updates from database
+    refetchOnWindowFocus: false, // Don't refetch when switching tabs
   });
 
   const isConnected = oltInfo?.connected ?? false;
