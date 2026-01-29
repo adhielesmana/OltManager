@@ -4,6 +4,10 @@
 A professional network operations management application for Huawei MA5801 OLT devices. This tool helps network operators manage GPON ONUs with safety guardrails to prevent accidental misconfigurations.
 
 ## Recent Changes (January 2026)
+- **SSH Connection Protection**: Retry logic with lockout (try once → wait 10s → retry 2x → 5min lockout)
+- **Clean SSH Logout**: Proper quit sequence to prevent Huawei "reenter limit" blocks
+- **Orphan ONU Removal**: Visible trash button for offline/LOS ONUs for easy individual removal
+- **Professional Landing Page**: Hubstaff-style hero with dashboard mockups and trust badges
 - **Automatic WiFi for Huawei ONUs**: WiFi config pushed via OMCI during binding with auto-reset
 - **VLANs reusable**: Multiple ONUs can share the same VLAN
 - **SSH command delay fix**: Added 800ms delay between heavy commands to prevent buffer issues

@@ -378,6 +378,16 @@ export async function registerRoutes(
     }
   });
 
+  // Get SSH connection status including lockout info
+  app.get("/api/olt/connection-status", requireAuth, async (req, res) => {
+    try {
+      const status = storage.getConnectionStatus();
+      res.json(status);
+    } catch (error) {
+      res.status(500).json({ status: "unknown", error: "Failed to get connection status" });
+    }
+  });
+
   app.get("/api/olt/info", requireAuth, async (req, res) => {
     try {
       const info = await storage.getOltInfo();

@@ -38,6 +38,14 @@ export class HuaweiSSH {
   private lastOperationEndTime: number = 0;
   private readonly OPERATION_COOLDOWN = 30000; // 30 seconds
   
+  // Connection retry and lockout protection (prevents Huawei "reenter limit" block)
+  private connectionAttempts: number = 0;
+  private lastFailedAttempt: number = 0;
+  private lockoutUntil: number = 0;
+  private readonly MAX_RETRIES = 2; // Max 2 retries after initial attempt
+  private readonly RETRY_DELAY = 10000; // 10 seconds between retries
+  private readonly LOCKOUT_DURATION = 300000; // 5 minutes lockout after max failures
+  
   private async waitForCooldown(operationName: string): Promise<void> {
     // Wait for any pending operations
     if (this.operationLock) {
@@ -64,9 +72,92 @@ export class HuaweiSSH {
     console.log("[SSH] Operation complete, 30s cooldown started");
   }
 
+  // Check if we're in lockout period
+  isLockedOut(): boolean {
+    const now = Date.now();
+    if (this.lockoutUntil > now) {
+      return true;
+    }
+    return false;
+  }
+  
+  // Get remaining lockout time in seconds
+  getLockoutRemaining(): number {
+    const now = Date.now();
+    if (this.lockoutUntil > now) {
+      return Math.ceil((this.lockoutUntil - now) / 1000);
+    }
+    return 0;
+  }
+  
+  // Reset connection attempts on successful connection
+  private resetConnectionAttempts(): void {
+    this.connectionAttempts = 0;
+    this.lastFailedAttempt = 0;
+    this.lockoutUntil = 0;
+  }
+  
+  // Record a failed connection attempt
+  private recordFailedAttempt(): void {
+    this.connectionAttempts++;
+    this.lastFailedAttempt = Date.now();
+    
+    // If we've exceeded max retries (initial + 2 retries = 3 total), enter lockout
+    if (this.connectionAttempts >= this.MAX_RETRIES + 1) {
+      this.lockoutUntil = Date.now() + this.LOCKOUT_DURATION;
+      console.log(`[SSH] Max connection attempts reached. Lockout for ${this.LOCKOUT_DURATION / 1000}s`);
+    }
+  }
+
+  // Connect with retry logic and lockout protection
   async connect(config: HuaweiSSHConfig): Promise<{ success: boolean; message: string }> {
+    // Check lockout
+    if (this.isLockedOut()) {
+      const remaining = this.getLockoutRemaining();
+      const msg = `Connection blocked: Too many failed attempts. Wait ${remaining}s before retrying.`;
+      console.log(`[SSH] ${msg}`);
+      this.lastConnectionError = msg;
+      return { success: false, message: msg };
+    }
+    
+    this.config = config;
+    
+    // Try to connect with retries
+    for (let attempt = 0; attempt <= this.MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        console.log(`[SSH] Retry attempt ${attempt}/${this.MAX_RETRIES} after ${this.RETRY_DELAY / 1000}s delay...`);
+        await new Promise(r => setTimeout(r, this.RETRY_DELAY));
+      }
+      
+      const result = await this.doConnect(config);
+      
+      if (result.success) {
+        this.resetConnectionAttempts();
+        return result;
+      }
+      
+      // Record failed attempt
+      this.recordFailedAttempt();
+      
+      // If we've hit lockout, don't retry
+      if (this.isLockedOut()) {
+        const remaining = this.getLockoutRemaining();
+        return { 
+          success: false, 
+          message: `Connection failed after ${attempt + 1} attempts. Wait ${remaining}s before retrying. Last error: ${result.message}` 
+        };
+      }
+    }
+    
+    return { 
+      success: false, 
+      message: `Connection failed after ${this.MAX_RETRIES + 1} attempts. ${this.lastConnectionError}` 
+    };
+  }
+  
+  // Single connection attempt (internal)
+  private doConnect(config: HuaweiSSHConfig): Promise<{ success: boolean; message: string }> {
     return new Promise((resolve) => {
-      this.config = config;
       this.client = new Client();
       this.connectionStatus = "connecting";
       this.lastConnectionError = "";
@@ -276,15 +367,59 @@ export class HuaweiSSH {
     });
   }
 
-  disconnect(): void {
+  // Clean disconnect with proper Huawei logout sequence
+  async disconnect(): Promise<void> {
+    console.log("[SSH] Starting clean disconnect...");
+    
+    // Try clean logout if shell is active
+    if (this.shell && this.connected) {
+      try {
+        // Send quit commands to exit cleanly from any config mode
+        // This prevents Huawei from counting as "unclean exit"
+        console.log("[SSH] Sending clean logout sequence...");
+        
+        // Exit any nested modes first
+        this.shell.write("quit\n");
+        await new Promise(r => setTimeout(r, 500));
+        
+        // Exit to user mode
+        this.shell.write("quit\n");
+        await new Promise(r => setTimeout(r, 500));
+        
+        // Final quit or logout (may ask for confirmation)
+        this.shell.write("quit\n");
+        await new Promise(r => setTimeout(r, 300));
+        
+        // Handle "Save configuration? [y/n]" prompt if it appears
+        this.shell.write("n\n");
+        await new Promise(r => setTimeout(r, 300));
+        
+        console.log("[SSH] Clean logout sequence completed");
+      } catch (err) {
+        console.log("[SSH] Error during clean logout:", err);
+      }
+    }
+    
+    // Close shell
     if (this.shell) {
-      this.shell.end();
+      try {
+        this.shell.end();
+      } catch (e) {
+        // Ignore errors during shell close
+      }
       this.shell = null;
     }
+    
+    // Close client connection
     if (this.client) {
-      this.client.end();
+      try {
+        this.client.end();
+      } catch (e) {
+        // Ignore errors during client close
+      }
       this.client = null;
     }
+    
     this.connected = false;
     this.connectionStatus = "disconnected";
     this.commandQueue = [];

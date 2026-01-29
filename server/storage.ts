@@ -292,7 +292,7 @@ export class DatabaseStorage implements IStorage {
     if (remainingSessions === 0) {
       console.log("[Storage] No active sessions remaining, disconnecting SSH...");
       if (huaweiSSH.isConnected()) {
-        huaweiSSH.disconnect();
+        await huaweiSSH.disconnect();
       }
     }
   }
@@ -377,9 +377,9 @@ export class DatabaseStorage implements IStorage {
     }
 
     try {
-      // Disconnect any existing connection
+      // Disconnect any existing connection (clean logout)
       if (huaweiSSH.isConnected()) {
-        huaweiSSH.disconnect();
+        await huaweiSSH.disconnect();
       }
 
       // Decrypt password and connect via SSH
@@ -723,11 +723,13 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  // Get SSH connection status for UI
-  getConnectionStatus(): { status: string; error: string } {
+  // Get SSH connection status for UI (includes lockout info)
+  getConnectionStatus(): { status: string; error: string; lockedOut: boolean; lockoutRemaining: number } {
     return {
       status: huaweiSSH.getConnectionStatus(),
       error: huaweiSSH.getLastError(),
+      lockedOut: huaweiSSH.isLockedOut(),
+      lockoutRemaining: huaweiSSH.getLockoutRemaining(),
     };
   }
 
