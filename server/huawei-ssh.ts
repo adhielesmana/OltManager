@@ -900,45 +900,63 @@ export class HuaweiSSH {
   }
 
   async getBoundOnus(): Promise<BoundOnu[]> {
-    let onus: BoundOnu[] = [];
+    const allOnus: BoundOnu[] = [];
     try {
-      // Enter GPON interface first
-      await this.executeCommand("interface gpon 0/1");
-      const output = await this.executeCommand("display ont info 0 all");
-      onus = this.parseBoundOnus(output, "0/1/0");
+      // Detect which slots have GPON boards
+      const gponSlots = await this.detectGponSlots();
+      console.log(`[SSH] Getting bound ONUs from slots: ${gponSlots.join(", ")}`);
       
-      // Get optical info for status if we have bound ONUs
-      if (onus.length > 0) {
+      // Scan each GPON slot
+      for (const slot of gponSlots) {
         try {
-          // Add delay to ensure shell buffer is clear after heavy display ont info command
-          const opticalOutput = await this.executeCommandWithDelay("display ont optical-info 0 all", 800);
-          this.enrichWithOpticalInfo(onus, opticalOutput);
-        } catch (err) {
-          console.log("[SSH] Could not get optical info");
-        }
-        
-        // Get descriptions for each ONU
-        for (const onu of onus) {
-          try {
-            const detailOutput = await this.executeCommand(`display ont info 0 ${onu.onuId}`);
-            this.parseOnuDescription(onu, detailOutput);
-          } catch (err) {
-            console.log(`[SSH] Could not get description for ONU ${onu.onuId}`);
+          // Enter GPON interface for this slot
+          await this.executeCommand(`interface gpon 0/${slot}`);
+          
+          // Get bound ONUs for ALL ports on this slot using "display ont info all"
+          const output = await this.executeCommand("display ont info all");
+          const slotOnus = this.parseBoundOnus(output, `0/${slot}/0`);
+          console.log(`[SSH] Found ${slotOnus.length} bound ONUs on slot ${slot}`);
+          
+          // Get optical info for all bound ONUs on this slot
+          if (slotOnus.length > 0) {
+            try {
+              // Add delay to ensure shell buffer is clear after heavy display ont info command
+              const opticalOutput = await this.executeCommandWithDelay("display ont optical-info all", 800);
+              this.enrichWithOpticalInfo(slotOnus, opticalOutput);
+            } catch (err) {
+              console.log(`[SSH] Could not get optical info for slot ${slot}`);
+            }
+            
+            // Get descriptions for each ONU (limit to first 50 to avoid timeout)
+            const onusToEnrich = slotOnus.slice(0, 50);
+            for (const onu of onusToEnrich) {
+              try {
+                // Parse port to get the port number for this command
+                const portParts = onu.gponPort.split("/");
+                const portNum = parseInt(portParts[2]) || 0;
+                const detailOutput = await this.executeCommand(`display ont info ${portNum} ${onu.onuId}`);
+                this.parseOnuDescription(onu, detailOutput);
+              } catch (err) {
+                console.log(`[SSH] Could not get description for ONU ${onu.onuId}`);
+              }
+            }
           }
+          
+          allOnus.push(...slotOnus);
+          
+          // Exit interface
+          await this.executeCommand("quit");
+        } catch (err) {
+          console.error(`[SSH] Error scanning slot ${slot}:`, err);
+          try { await this.executeCommand("quit"); } catch {}
         }
       }
       
-      return onus;
+      console.log(`[SSH] Total bound ONUs found: ${allOnus.length}`);
+      return allOnus;
     } catch (err) {
       console.error("[SSH] Error getting bound ONUs:", err);
       return [];
-    } finally {
-      // Always exit interface back to config mode
-      try {
-        await this.executeCommand("quit");
-      } catch (e) {
-        console.log("[SSH] Error during quit:", e);
-      }
     }
   }
 
