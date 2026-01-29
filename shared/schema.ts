@@ -70,6 +70,11 @@ export const oltCredentials = pgTable("olt_credentials", {
   lastConnected: timestamp("last_connected"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   createdBy: integer("created_by"),
+  // Cached OLT static info - only updated when OLT changes
+  oltSerialNumber: text("olt_serial_number"),
+  oltModel: text("olt_model"),
+  oltVersion: text("olt_version"),
+  cachedGponPorts: text("cached_gpon_ports"), // JSON array of port strings
 });
 
 export const oltCredentialsRelations = relations(oltCredentials, ({ one }) => ({

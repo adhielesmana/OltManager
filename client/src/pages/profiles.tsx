@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import type { LineProfile, ServiceProfile } from "@shared/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -12,9 +13,13 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Layers, GitBranch, Settings2 } from "lucide-react";
+import { Layers, GitBranch, Settings2, RefreshCw } from "lucide-react";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 export default function ProfilesPage() {
+  const { toast } = useToast();
+
   const { data: lineProfiles = [], isLoading: lineLoading } = useQuery<LineProfile[]>({
     queryKey: ["/api/profiles/line"],
   });
@@ -23,16 +28,47 @@ export default function ProfilesPage() {
     queryKey: ["/api/profiles/service"],
   });
 
+  const reloadMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/profiles/refresh");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({ title: "Reload Complete", description: data.message });
+        queryClient.invalidateQueries({ queryKey: ["/api/profiles/line"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/profiles/service"] });
+      } else {
+        toast({ title: "Reload Failed", description: data.message, variant: "destructive" });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Reload Error", description: error.message, variant: "destructive" });
+    },
+  });
+
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Layers className="h-6 w-6 text-muted-foreground" />
-          Profiles
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Line and service profiles for ONU configuration
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+            <Layers className="h-6 w-6 text-muted-foreground" />
+            Profiles
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Line and service profiles for ONU configuration
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => reloadMutation.mutate()}
+          disabled={reloadMutation.isPending}
+          data-testid="button-refresh-profiles"
+        >
+          <RefreshCw className={`h-4 w-4 mr-2 ${reloadMutation.isPending ? "animate-spin" : ""}`} />
+          {reloadMutation.isPending ? "Reloading..." : "Reload from OLT"}
+        </Button>
       </div>
 
       <Tabs defaultValue="line" className="space-y-4">

@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import type { Vlan } from "@shared/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -12,14 +13,35 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Network, Search, CheckCircle, XCircle } from "lucide-react";
+import { Network, Search, CheckCircle, XCircle, RefreshCw } from "lucide-react";
 import { useState } from "react";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 export default function VlansPage() {
   const [searchQuery, setSearchQuery] = useState("");
+  const { toast } = useToast();
 
   const { data: vlans = [], isLoading } = useQuery<Vlan[]>({
     queryKey: ["/api/vlans"],
+  });
+
+  const reloadMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/vlans/refresh");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({ title: "Reload Complete", description: data.message });
+        queryClient.invalidateQueries({ queryKey: ["/api/vlans"] });
+      } else {
+        toast({ title: "Reload Failed", description: data.message, variant: "destructive" });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Reload Error", description: error.message, variant: "destructive" });
+    },
   });
 
   const filteredVlans = vlans.filter(
@@ -45,14 +67,26 @@ export default function VlansPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Network className="h-6 w-6 text-muted-foreground" />
-          VLANs
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Available VLANs for ONU service binding
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+            <Network className="h-6 w-6 text-muted-foreground" />
+            VLANs
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Available VLANs for ONU service binding
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => reloadMutation.mutate()}
+          disabled={reloadMutation.isPending}
+          data-testid="button-refresh-vlans"
+        >
+          <RefreshCw className={`h-4 w-4 mr-2 ${reloadMutation.isPending ? "animate-spin" : ""}`} />
+          {reloadMutation.isPending ? "Reloading..." : "Reload from OLT"}
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

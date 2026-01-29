@@ -88,7 +88,7 @@ export function AppSidebar() {
   const { data: unboundCount } = useQuery<{ count: number }>({
     queryKey: ["/api/onu/unbound/count"],
     enabled: !!user,
-    refetchInterval: 5000, // Poll every 5 seconds for real-time updates from database
+    refetchInterval: 60000, // Update sidebar count every minute (background unbound check runs every 5 mins)
     refetchOnWindowFocus: false, // Don't refetch when switching tabs
   });
 

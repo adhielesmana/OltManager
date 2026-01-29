@@ -28,9 +28,8 @@ export default function UnboundOnuPage() {
   const [verifyDialogOpen, setVerifyDialogOpen] = useState(false);
   const { toast } = useToast();
 
-  const { data: unboundOnus = [], isLoading, refetch, isFetching } = useQuery<UnboundOnu[]>({
+  const { data: unboundOnus = [], isLoading } = useQuery<UnboundOnu[]>({
     queryKey: ["/api/onu/unbound"],
-    refetchInterval: 5000, // Poll every 5 seconds for real-time updates from database
     refetchOnWindowFocus: false, // Don't refetch when switching tabs
   });
 

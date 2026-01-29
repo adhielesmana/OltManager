@@ -462,12 +462,32 @@ export async function registerRoutes(
     }
   });
 
+  // Refresh profiles directly from OLT
+  app.post("/api/profiles/refresh", requireAuth, requirePermission("profiles:view"), async (req, res) => {
+    try {
+      const result = await storage.refreshProfiles();
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ success: false, message: "Failed to refresh profiles" });
+    }
+  });
+
   app.get("/api/vlans", requireAuth, requirePermission("vlans:view"), async (req, res) => {
     try {
       const vlans = await storage.getVlans();
       res.json(vlans);
     } catch (error) {
       res.status(500).json({ error: "Failed to get VLANs" });
+    }
+  });
+
+  // Refresh VLANs directly from OLT
+  app.post("/api/vlans/refresh", requireAuth, requirePermission("vlans:view"), async (req, res) => {
+    try {
+      const result = await storage.refreshVlans();
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ success: false, message: "Failed to refresh VLANs" });
     }
   });
 
@@ -480,9 +500,15 @@ export async function registerRoutes(
     ];
     
     try {
-      // Try to get ports from SSH if connected
-      const sshPorts = await huaweiSSH.getGponPorts();
+      // First try to get cached ports from database (no SSH needed)
+      const cachedPorts = await storage.getCachedGponPorts();
+      if (cachedPorts.length > 0) {
+        res.json(cachedPorts);
+        return;
+      }
       
+      // If no cached ports, try to get from SSH if connected
+      const sshPorts = await huaweiSSH.getGponPorts();
       if (sshPorts.length > 0) {
         res.json(sshPorts);
       } else {

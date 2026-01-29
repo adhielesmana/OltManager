@@ -101,17 +101,17 @@ export class DatabaseStorage implements IStorage {
       clearInterval(this.autoSyncInterval);
     }
     
-    // Auto-sync every 60 minutes (3600000 ms)
-    const SYNC_INTERVAL = 60 * 60 * 1000;
-    console.log("[Storage] Auto-sync enabled: refreshing OLT data every 60 minutes");
+    // Auto-sync unbound ONUs every 5 minutes (300000 ms)
+    const UNBOUND_SYNC_INTERVAL = 5 * 60 * 1000;
+    console.log("[Storage] Auto-sync enabled: checking unbound ONUs every 5 minutes");
     
     this.autoSyncInterval = setInterval(async () => {
       try {
         if (huaweiSSH.isConnected()) {
-          console.log("[Storage] Auto-sync: Starting scheduled OLT data refresh...");
-          const result = await this.refreshOltData();
+          console.log("[Storage] Auto-sync: Checking for new unbound ONUs...");
+          const result = await this.refreshUnboundOnus();
           if (result.success) {
-            console.log("[Storage] Auto-sync: Completed successfully");
+            console.log("[Storage] Auto-sync: Unbound ONUs updated");
           } else {
             console.log(`[Storage] Auto-sync: Failed - ${result.message}`);
           }
@@ -121,7 +121,7 @@ export class DatabaseStorage implements IStorage {
       } catch (error: any) {
         console.error("[Storage] Auto-sync error:", error.message);
       }
-    }, SYNC_INTERVAL);
+    }, UNBOUND_SYNC_INTERVAL);
   }
 
   private async autoReconnectOlt(): Promise<void> {
@@ -147,10 +147,13 @@ export class DatabaseStorage implements IStorage {
           .set({ isConnected: true, lastConnected: new Date() })
           .where(eq(oltCredentials.id, credential.id));
         
-        // Auto-refresh data after successful connection
-        console.log("[Storage] Automatically loading all OLT information...");
-        this.refreshOltData().catch(err => {
-          console.error("[Storage] Auto-refresh failed:", err.message);
+        // Cache OLT static info (serial, model, version, GPON ports)
+        await this.cacheOltStaticInfo(credential.id);
+        
+        // Only refresh unbound ONUs on auto-reconnect (not all data)
+        console.log("[Storage] Checking for unbound ONUs...");
+        this.refreshUnboundOnus().catch(err => {
+          console.error("[Storage] Auto-refresh unbound failed:", err.message);
         });
       } else {
         console.log(`[Storage] Auto-reconnect failed: ${result.message}`);
@@ -406,6 +409,9 @@ export class DatabaseStorage implements IStorage {
           await db.insert(oltDataRefresh).values({ oltCredentialId: id });
         }
         
+        // Cache OLT static info (serial, model, version, GPON ports)
+        await this.cacheOltStaticInfo(id);
+        
         // Auto-refresh data after successful connection
         console.log("[Storage] Automatically loading all OLT information...");
         this.refreshOltData().catch(err => {
@@ -420,6 +426,56 @@ export class DatabaseStorage implements IStorage {
     } catch (error: any) {
       await this.updateOltCredential(id, { isConnected: false });
       return { success: false, message: `Connection failed: ${error.message}` };
+    }
+  }
+
+  // Cache OLT static info (serial, model, version, GPON ports) - only updates if changed
+  private async cacheOltStaticInfo(credentialId: number): Promise<void> {
+    try {
+      console.log("[Storage] Caching OLT static info...");
+      const oltInfo = await huaweiSSH.getOltInfo();
+      const gponPorts = await huaweiSSH.getGponPorts();
+      
+      // Get current cached info
+      const [credential] = await db.select().from(oltCredentials).where(eq(oltCredentials.id, credentialId));
+      if (!credential) return;
+      
+      // Check if OLT has changed (different serial number)
+      const newSerial = oltInfo.serialNumber || "";
+      const cachedSerial = credential.oltSerialNumber || "";
+      
+      if (cachedSerial && cachedSerial === newSerial) {
+        console.log("[Storage] Same OLT detected, using cached static info");
+        return; // Same OLT, no need to update static info
+      }
+      
+      // OLT changed or first connection - update cached info
+      console.log("[Storage] New OLT detected, caching static info");
+      await db.update(oltCredentials)
+        .set({
+          oltSerialNumber: newSerial,
+          oltModel: oltInfo.model || oltInfo.product,
+          oltVersion: oltInfo.version,
+          cachedGponPorts: JSON.stringify(gponPorts),
+        })
+        .where(eq(oltCredentials.id, credentialId));
+      
+      console.log(`[Storage] Cached OLT info: model=${oltInfo.model}, serial=${newSerial}, ports=${gponPorts.length}`);
+    } catch (error: any) {
+      console.error("[Storage] Failed to cache OLT static info:", error.message);
+    }
+  }
+
+  // Get cached GPON ports from database
+  async getCachedGponPorts(): Promise<string[]> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential || !credential.cachedGponPorts) {
+      return [];
+    }
+    try {
+      return JSON.parse(credential.cachedGponPorts);
+    } catch {
+      return [];
     }
   }
 
@@ -697,6 +753,119 @@ export class DatabaseStorage implements IStorage {
       return { success: true, message: `Found ${boundList.length} bound ONUs` };
     } catch (error: any) {
       console.error("[Storage] Error refreshing bound ONUs:", error);
+      return { success: false, message: `Refresh failed: ${error.message}` };
+    }
+  }
+
+  // Refresh only profiles from OLT
+  async refreshProfiles(): Promise<{ success: boolean; message: string }> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential) {
+      return { success: false, message: "No active OLT credential" };
+    }
+
+    if (!huaweiSSH.isConnected()) {
+      const password = decryptOltPassword(credential.passwordEncrypted);
+      const connectResult = await huaweiSSH.connect({
+        host: credential.host,
+        port: credential.port,
+        username: credential.username,
+        password: password,
+      });
+      if (!connectResult.success) {
+        return { success: false, message: `Cannot connect to OLT: ${connectResult.message}` };
+      }
+    }
+
+    try {
+      console.log("[Storage] Refreshing profiles from OLT...");
+      const fetchedLineProfiles = await huaweiSSH.getLineProfiles();
+      const fetchedServiceProfiles = await huaweiSSH.getServiceProfiles();
+      
+      // Clear old profiles and insert new
+      await db.delete(lineProfiles).where(eq(lineProfiles.oltCredentialId, credential.id));
+      await db.delete(serviceProfiles).where(eq(serviceProfiles.oltCredentialId, credential.id));
+      
+      if (fetchedLineProfiles.length > 0) {
+        await db.insert(lineProfiles).values(
+          fetchedLineProfiles.map(p => ({
+            profileId: p.id,
+            name: p.name,
+            description: p.description || "",
+            tcont: p.tcont || 0,
+            gemportId: p.gemportId || 0,
+            mappingMode: p.mappingMode || "",
+            oltCredentialId: credential.id,
+          }))
+        );
+      }
+      
+      if (fetchedServiceProfiles.length > 0) {
+        await db.insert(serviceProfiles).values(
+          fetchedServiceProfiles.map(p => ({
+            profileId: p.id,
+            name: p.name,
+            description: p.description || "",
+            portCount: p.portCount || 1,
+            portType: p.portType || "eth",
+            oltCredentialId: credential.id,
+          }))
+        );
+      }
+      
+      console.log(`[Storage] Refreshed ${fetchedLineProfiles.length} line profiles, ${fetchedServiceProfiles.length} service profiles`);
+      return { success: true, message: `Found ${fetchedLineProfiles.length} line profiles, ${fetchedServiceProfiles.length} service profiles` };
+    } catch (error: any) {
+      console.error("[Storage] Error refreshing profiles:", error);
+      return { success: false, message: `Refresh failed: ${error.message}` };
+    }
+  }
+
+  // Refresh only VLANs from OLT
+  async refreshVlans(): Promise<{ success: boolean; message: string }> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential) {
+      return { success: false, message: "No active OLT credential" };
+    }
+
+    if (!huaweiSSH.isConnected()) {
+      const password = decryptOltPassword(credential.passwordEncrypted);
+      const connectResult = await huaweiSSH.connect({
+        host: credential.host,
+        port: credential.port,
+        username: credential.username,
+        password: password,
+      });
+      if (!connectResult.success) {
+        return { success: false, message: `Cannot connect to OLT: ${connectResult.message}` };
+      }
+    }
+
+    try {
+      console.log("[Storage] Refreshing VLANs from OLT...");
+      const fetchedVlans = await huaweiSSH.getVlans();
+      
+      // Clear old VLANs and insert new
+      await db.delete(vlans).where(eq(vlans.oltCredentialId, credential.id));
+      
+      if (fetchedVlans.length > 0) {
+        await db.insert(vlans).values(
+          fetchedVlans.map(v => ({
+            vlanId: v.id,
+            name: v.name,
+            description: v.description || "",
+            type: v.type,
+            tagged: v.tagged,
+            inUse: v.inUse,
+            oltCredentialId: credential.id,
+          }))
+        );
+      }
+      
+      console.log(`[Storage] Refreshed ${fetchedVlans.length} VLANs`);
+      return { success: true, message: `Found ${fetchedVlans.length} VLANs` };
+    } catch (error: any) {
+      console.error("[Storage] Error refreshing VLANs:", error);
       return { success: false, message: `Refresh failed: ${error.message}` };
     }
   }

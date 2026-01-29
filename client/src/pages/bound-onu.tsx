@@ -42,9 +42,8 @@ export default function BoundOnuPage() {
   const [verifyDialogOpen, setVerifyDialogOpen] = useState(false);
   const { toast } = useToast();
 
-  const { data: boundOnus = [], isLoading, refetch, isFetching } = useQuery<BoundOnu[]>({
+  const { data: boundOnus = [], isLoading } = useQuery<BoundOnu[]>({
     queryKey: ["/api/onu/bound"],
-    refetchInterval: 5000, // Poll every 5 seconds for real-time updates from database
     refetchOnWindowFocus: false, // Don't refetch when switching tabs
   });
 

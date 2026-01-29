@@ -4,6 +4,14 @@
 A professional network operations management application for Huawei MA5801 OLT devices. This tool helps network operators manage GPON ONUs with safety guardrails to prevent accidental misconfigurations.
 
 ## Recent Changes (January 2026)
+- **Optimized Data Refresh Architecture**: Per-feature reload buttons instead of batch updates
+  - Bound ONUs: Reload button on Bound ONU page
+  - Unbound ONUs: Background check every 5 minutes + reload button
+  - Profiles: Reload button on Profiles page
+  - VLANs: Reload button on VLANs page
+- **OLT Static Info Caching**: Serial number, model, version, and GPON ports cached in database
+  - Only re-fetched when connecting to a different OLT
+  - GPON ports served from cache without SSH query
 - **SSH Connection Protection**: Retry logic with lockout (try once → wait 10s → retry 2x → 5min lockout)
 - **Clean SSH Logout**: Proper quit sequence to prevent Huawei "reenter limit" blocks
 - **Orphan ONU Removal**: Visible trash button for offline/LOS ONUs for easy individual removal
@@ -13,9 +21,6 @@ A professional network operations management application for Huawei MA5801 OLT d
 - **SSH command delay fix**: Added 800ms delay between heavy commands to prevent buffer issues
 - **Auto-detect GPON ports**: Automatically detects port count from OLT board info (8 or 16 ports)
 - **Database storage for OLT data**: All ONU, profile, and VLAN data now stored in database
-- **Auto-sync every 60 minutes**: OLT data automatically refreshed in background
-- **Manual sync from OLT**: Added "Sync from OLT" button with 30-second cooldown
-- **Last sync time**: Shows when data was last refreshed from OLT
 - Added user authentication and authorization system
 - Implemented role-based access control (super_admin, admin, user)
 - Added user management page for admins
