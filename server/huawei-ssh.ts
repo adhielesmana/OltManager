@@ -1255,8 +1255,31 @@ export class HuaweiSSH {
         console.log(`[SSH] Service-port created successfully`);
       }
 
+      // Step 10: For Huawei ONUs, reset to force apply OMCI config (including WiFi)
+      // WiFi config is pushed automatically via OMCI when using service profile with WLAN enabled
+      if (!isGeneral) {
+        console.log(`[SSH] Step 10: Resetting ONU to force apply OMCI config (WiFi)...`);
+        try {
+          // Need to enter GPON interface first
+          await this.executeCommand("interface gpon " + String(frame) + "/" + String(slot));
+          await this.delay(500);
+          
+          // ont reset command to force apply config - WiFi appears in ~30-60 seconds
+          const resetCmd = "ont reset " + String(port) + " " + String(onuId);
+          console.log(`[SSH] Executing: ${resetCmd}`);
+          const resetResult = await this.executeCommand(resetCmd);
+          console.log(`[SSH] Reset result: ${resetResult.substring(0, 100)}`);
+          
+          // Exit GPON interface
+          await this.executeCommand("quit");
+        } catch (resetErr) {
+          console.log(`[SSH] Warning: ONU reset failed (non-critical): ${resetErr}`);
+          // Non-critical - WiFi will still work, just takes longer to apply
+        }
+      }
+
       console.log(`[SSH] Successfully bound ONU ${serialNumber} as ID ${onuId} on ${gponPort}`);
-      return { success: true, message: `ONU bound successfully as ID ${onuId}` };
+      return { success: true, message: `ONU bound successfully as ID ${onuId}${!isGeneral ? " - WiFi will be ready in ~60 seconds" : ""}` };
 
     } catch (error) {
       console.error("[SSH] Error binding ONU:", error);

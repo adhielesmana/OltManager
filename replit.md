@@ -4,6 +4,9 @@
 A professional network operations management application for Huawei MA5801 OLT devices. This tool helps network operators manage GPON ONUs with safety guardrails to prevent accidental misconfigurations.
 
 ## Recent Changes (January 2026)
+- **Automatic WiFi for Huawei ONUs**: WiFi config pushed via OMCI during binding with auto-reset
+- **VLANs reusable**: Multiple ONUs can share the same VLAN
+- **SSH command delay fix**: Added 800ms delay between heavy commands to prevent buffer issues
 - **Auto-detect GPON ports**: Automatically detects port count from OLT board info (8 or 16 ports)
 - **Database storage for OLT data**: All ONU, profile, and VLAN data now stored in database
 - **Auto-sync every 60 minutes**: OLT data automatically refreshed in background

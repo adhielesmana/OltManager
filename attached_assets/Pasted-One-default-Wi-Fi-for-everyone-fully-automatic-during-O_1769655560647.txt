@@ -1,0 +1,150 @@
+One default Wi-Fi for everyone, fully automatic during ONU binding. Let’s do it simple, safe, and Huawei-correct.
+
+I’ll assume:
+
+Huawei MA5801-GP16-H2
+
+OMCI-based Wi-Fi
+
+Dual band ONU (2.4G + 5G)
+
+Target:
+
+SSID 2.4G : Maxnet2G
+SSID 5G   : Maxnet5G
+Password : maxnetplus
+
+✅ High-level flow (what will happen automatically)
+ONU added → OMCI pushed → Wi-Fi enabled → SSID broadcast
+
+
+No per-ONU config
+No TR-069
+No manual work
+
+1️⃣ Create SSID profiles
+2.4 GHz SSID
+wlan ssid-profile add profile-id 100 name MAXNET_2G
+wlan ssid-profile modify profile-id 100 ssid-name Maxnet2G
+
+5 GHz SSID
+wlan ssid-profile add profile-id 101 name MAXNET_5G
+wlan ssid-profile modify profile-id 101 ssid-name Maxnet5G
+
+2️⃣ Create ONE security profile (shared password)
+wlan security-profile add profile-id 100
+
+
+Set WPA2 password:
+
+wlan security-profile modify profile-id 100 \
+  authentication-mode wpa2-psk \
+  encryption-mode aes \
+  passphrase cipher maxnetplus
+
+
+✅ Same password for both bands
+✅ Clean and consistent
+
+3️⃣ Create WLAN profiles (per radio)
+WLAN profile for 2.4G
+wlan profile add profile-id 100
+wlan profile modify profile-id 100 \
+  ssid-profile-id 100 \
+  security-profile-id 100
+
+WLAN profile for 5G
+wlan profile add profile-id 101
+wlan profile modify profile-id 101 \
+  ssid-profile-id 101 \
+  security-profile-id 100
+
+4️⃣ Bind WLAN profiles to ONT Service Profile
+
+Enter your ONT service profile:
+
+ont-srvprofile profile-name SURGE_SP_ALLVLAN
+
+
+Enable WLAN:
+
+wlan enable
+
+
+Bind WLAN to radios:
+
+wlan bind wlan-profile-id 100 radio 1   // 2.4G
+wlan bind wlan-profile-id 101 radio 2   // 5G
+
+
+Save:
+
+commit
+
+5️⃣ Bind ONU (automatic Wi-Fi)
+
+When adding ONU:
+
+ont add 0 0 sn-auth <ONU_SN> \
+  omci ont-lineprofile-name SURGE_LP_ALLVLAN \
+  ont-srvprofile-name SURGE_SP_ALLVLAN \
+  desc <CUSTOMER_NAME>
+
+
+OMCI will:
+
+Enable Wi-Fi
+
+Set SSID names
+
+Set password
+
+Apply to both radios
+
+6️⃣ Force apply (recommended)
+
+After ONU binds:
+
+ont reset 0/1 <ONU_ID>
+
+
+⏱️ Wi-Fi appears in ~30–60 seconds
+
+7️⃣ Verify from OLT
+display ont wlan info 0/1 <ONU_ID>
+
+
+or
+
+display ont info 0/1 <ONU_ID>
+
+⚠️ Important notes (don’t skip)
+1️⃣ All ONUs will share:
+
+Same SSID
+
+Same password
+
+✔️ This is exactly what you want now
+❌ Not secure long-term (but very common for early-stage ISPs)
+
+2️⃣ If ONU shows interoperability mismatch
+
+ONU model not fully OMCI compatible
+
+Try:
+
+ont reset
+
+
+or test with Huawei-branded ONU first
+
+3️⃣ If SSID does NOT appear
+
+Checklist:
+
+ONU supports WLAN OMCI
+
+Correct radio numbering
+
+WLAN enabled in srvprofile
