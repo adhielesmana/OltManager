@@ -25,11 +25,7 @@ interface OltCredential {
   lastConnected: string | null;
 }
 
-interface OltInfo {
-  product: string;
-  connected: boolean;
-  connectionStatus?: "disconnected" | "connecting" | "connected" | "failed";
-}
+import type { OltInfo } from "@shared/schema";
 
 export default function OltSettingsPage() {
   const { toast } = useToast();
