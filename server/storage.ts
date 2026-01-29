@@ -86,13 +86,16 @@ export class DatabaseStorage implements IStorage {
   // Lock to prevent concurrent OLT data refresh operations
   private refreshLock: Promise<void> | null = null;
   private autoSyncInterval: NodeJS.Timeout | null = null;
+  private midnightTimeout: NodeJS.Timeout | null = null;
 
   constructor() {
     console.log("[Storage] Database storage initialized - data served from database");
     // Auto-reconnect to active OLT after startup
     setTimeout(() => this.autoReconnectOlt(), 2000);
-    // Start auto-sync every 60 minutes
+    // Start auto-sync every 5 minutes for ONUs
     this.startAutoSync();
+    // Schedule daily GPON port refresh at midnight
+    this.scheduleMidnightRefresh();
   }
 
   private startAutoSync(): void {
@@ -108,6 +111,57 @@ export class DatabaseStorage implements IStorage {
     this.autoSyncInterval = setInterval(async () => {
       await this.runAutoSync();
     }, SYNC_INTERVAL);
+  }
+
+  private scheduleMidnightRefresh(): void {
+    // Calculate time until next midnight
+    const now = new Date();
+    const midnight = new Date(now);
+    midnight.setHours(24, 0, 0, 0); // Next midnight
+    const msUntilMidnight = midnight.getTime() - now.getTime();
+    
+    console.log(`[Storage] GPON port refresh scheduled for midnight (in ${Math.round(msUntilMidnight / 1000 / 60)} minutes)`);
+    
+    // Clear any existing timeout
+    if (this.midnightTimeout) {
+      clearTimeout(this.midnightTimeout);
+    }
+    
+    // Schedule the first midnight refresh
+    this.midnightTimeout = setTimeout(async () => {
+      await this.runMidnightRefresh();
+      // After first run, schedule daily repeats
+      this.startDailyRefreshInterval();
+    }, msUntilMidnight);
+  }
+
+  private startDailyRefreshInterval(): void {
+    // Run daily at midnight (24 hours interval)
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+    setInterval(async () => {
+      await this.runMidnightRefresh();
+    }, ONE_DAY);
+  }
+
+  private async runMidnightRefresh(): Promise<void> {
+    console.log("[Storage] Midnight refresh: Updating GPON ports and OLT static info...");
+    try {
+      if (huaweiSSH.isConnected()) {
+        const credential = await this.getActiveOltCredential();
+        if (credential) {
+          // Force refresh of GPON ports
+          const gponPorts = await huaweiSSH.getGponPorts();
+          await db.update(oltCredentials)
+            .set({ cachedGponPorts: JSON.stringify(gponPorts) })
+            .where(eq(oltCredentials.id, credential.id));
+          console.log(`[Storage] Midnight refresh: Updated ${gponPorts.length} GPON ports`);
+        }
+      } else {
+        console.log("[Storage] Midnight refresh: Skipped - OLT not connected");
+      }
+    } catch (error: any) {
+      console.error("[Storage] Midnight refresh error:", error.message);
+    }
   }
   
   private async runAutoSync(): Promise<void> {
@@ -516,10 +570,8 @@ export class DatabaseStorage implements IStorage {
       }
     }
     
-    // Detect and cache GPON ports after connection (async, don't wait)
-    huaweiSSH.getGponPorts().catch(err => {
-      console.log("[Storage] GPON port detection failed:", err);
-    });
+    // Note: GPON ports are only fetched on OLT registration and daily at midnight
+    // No SSH call here - use cached ports from database
 
     // Wait for any ongoing refresh to complete
     if (this.refreshLock) {

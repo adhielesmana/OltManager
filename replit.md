@@ -20,6 +20,8 @@ A professional network operations management application for Huawei MA5801 OLT d
 - **VLANs reusable**: Multiple ONUs can share the same VLAN
 - **SSH command delay fix**: Added 800ms delay between heavy commands to prevent buffer issues
 - **Auto-detect GPON ports**: Automatically detects port count from OLT board info (8 or 16 ports)
+- **Optimized GPON port refresh**: Only fetched on OLT registration, then daily at midnight (no frequent SSH queries)
+- **WiFi SSID/Password display**: Shows WiFi credentials in bound ONU detail view
 - **Database storage for OLT data**: All ONU, profile, and VLAN data now stored in database
 - Added user authentication and authorization system
 - Implemented role-based access control (super_admin, admin, user)
@@ -47,7 +49,12 @@ The app automatically detects available GPON ports from the OLT:
 ### Fallback Behavior
 - Before SSH connects: Shows 16 ports (0/1/0-7 and 0/2/0-7) as default
 - After SSH connects: Shows actual detected ports
-- Cached until reconnect for fast access
+- Cached in database for fast access
+
+### Refresh Schedule
+- **Immediate**: Fetched when registering/connecting to an OLT
+- **Daily**: Automatically refreshed at midnight
+- **No on-demand SSH**: API always serves from database cache
 
 ## Data Storage Architecture
 

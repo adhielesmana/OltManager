@@ -491,7 +491,8 @@ export async function registerRoutes(
     }
   });
 
-  // Get available GPON ports from OLT via SSH
+  // Get available GPON ports from database cache only (no SSH)
+  // GPON ports are fetched on OLT registration and refreshed daily at midnight
   app.get("/api/gpon-ports", requireAuth, requirePermission("onu:view"), async (req, res) => {
     // Fallback to 16 ports (2 slots x 8 ports each) as default
     const defaultPorts = [
@@ -500,22 +501,14 @@ export async function registerRoutes(
     ];
     
     try {
-      // First try to get cached ports from database (no SSH needed)
+      // Only use cached ports from database - no SSH calls
       const cachedPorts = await storage.getCachedGponPorts();
       if (cachedPorts.length > 0) {
         res.json(cachedPorts);
-        return;
-      }
-      
-      // If no cached ports, try to get from SSH if connected
-      const sshPorts = await huaweiSSH.getGponPorts();
-      if (sshPorts.length > 0) {
-        res.json(sshPorts);
       } else {
         res.json(defaultPorts);
       }
     } catch (error) {
-      // On any error, return default ports
       console.error("[Routes] Error getting GPON ports:", error);
       res.json(defaultPorts);
     }
