@@ -192,7 +192,8 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
     setValidationStatus("idle");
   };
 
-  const availableVlans = vlans.filter(v => !v.inUse);
+  // VLANs can be used by multiple ONUs - no filtering needed
+  const availableVlans = vlans;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
