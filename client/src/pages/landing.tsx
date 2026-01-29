@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Input } from "@/components/ui/input";
 import { 
   Network, 
   Shield, 
@@ -14,9 +15,14 @@ import {
   Wifi,
   Eye,
   Settings,
-  BarChart3
+  BarChart3,
+  Star
 } from "lucide-react";
 import huaweiLogo from "@/assets/huawei-logo.png";
+import dashboardMockup from "@/assets/dashboard-mockup.png";
+import dashboardWidget from "@/assets/dashboard-widget-chart.png";
+import chatWidget from "@/assets/dashboard-chat-widget.png";
+import insightsBadge from "@/assets/dashboard-insights-badge.png";
 
 const features = [
   {
@@ -72,60 +78,175 @@ export default function LandingPage() {
             <img src={huaweiLogo} alt="Huawei" className="h-8 w-auto" />
             <span className="font-semibold text-lg">OLT Manager</span>
           </div>
+          <div className="hidden md:flex items-center gap-6">
+            <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Features</a>
+            <a href="#capabilities" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Capabilities</a>
+            <a href="#demo" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Demo</a>
+          </div>
           <div className="flex items-center gap-3">
             <ThemeToggle />
             <Link href="/login">
-              <Button data-testid="button-nav-login">
+              <Button variant="outline" className="hidden sm:inline-flex" data-testid="button-nav-signin">
                 Sign In
-                <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            </Link>
+            <Link href="/login">
+              <Button data-testid="button-nav-trial">
+                Free Trial
               </Button>
             </Link>
           </div>
         </div>
       </nav>
 
-      {/* Hero Section */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-primary/10" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-500/10 via-transparent to-transparent" />
+      {/* Hero Section - Dark Gradient Like Hubstaff */}
+      <section className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 dark:from-slate-950 dark:via-blue-950 dark:to-slate-950">
+        {/* Background decorations */}
+        <div className="absolute top-0 left-0 w-full h-full overflow-hidden">
+          <div className="absolute top-20 left-10 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl" />
+          <div className="absolute bottom-20 right-20 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl" />
+          <div className="absolute top-1/2 left-1/3 w-64 h-64 bg-cyan-500/5 rounded-full blur-3xl" />
+        </div>
         
-        <div className="container mx-auto px-4 py-20 md:py-32 relative">
-          <div className="max-w-4xl mx-auto text-center">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6">
-              <Wifi className="h-4 w-4" />
-              Professional GPON Network Management
+        <div className="container mx-auto px-4 py-16 md:py-24 relative">
+          <div className="grid lg:grid-cols-2 gap-12 items-center">
+            {/* Left Side - Text Content */}
+            <div className="text-white">
+              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight mb-6 leading-tight">
+                Streamline network
+                <br />
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
+                  operations for ISP
+                </span>
+                <br />
+                teams everywhere
+              </h1>
+              
+              <p className="text-lg md:text-xl text-gray-300 mb-8 max-w-lg">
+                One platform to manage ONU discovery, binding, optical monitoring, and GPON network configuration.
+              </p>
+              
+              {/* Email Signup Form */}
+              <div className="flex flex-col sm:flex-row gap-3 max-w-md mb-6">
+                <Input 
+                  type="email" 
+                  placeholder="Enter your work email"
+                  className="bg-white/10 border-white/20 text-white placeholder:text-gray-400 h-12"
+                  data-testid="input-hero-email"
+                />
+                <Link href="/login">
+                  <Button size="lg" className="h-12 px-6 bg-amber-500 hover:bg-amber-600 text-black font-semibold whitespace-nowrap" data-testid="button-hero-create">
+                    Get Started
+                  </Button>
+                </Link>
+              </div>
+              
+              <p className="text-sm text-gray-400 mb-10">
+                No credit card required
+              </p>
+              
+              {/* Trust Badges */}
+              <div className="flex flex-wrap items-center gap-6">
+                <div className="flex items-center gap-2 bg-white/10 rounded-lg px-4 py-2">
+                  <Star className="h-4 w-4 text-amber-400 fill-amber-400" />
+                  <span className="text-sm text-white font-medium">4.9</span>
+                  <span className="text-xs text-gray-400">Rating</span>
+                </div>
+                <div className="flex items-center gap-2 bg-white/10 rounded-lg px-4 py-2">
+                  <Network className="h-4 w-4 text-blue-400" />
+                  <span className="text-sm text-white font-medium">MA5801</span>
+                  <span className="text-xs text-gray-400">Certified</span>
+                </div>
+                <div className="flex items-center gap-2 bg-white/10 rounded-lg px-4 py-2">
+                  <Shield className="h-4 w-4 text-green-400" />
+                  <span className="text-sm text-white font-medium">Secure</span>
+                  <span className="text-xs text-gray-400">SSH</span>
+                </div>
+                <div className="flex items-center gap-2 bg-white/10 rounded-lg px-4 py-2">
+                  <Users className="h-4 w-4 text-purple-400" />
+                  <span className="text-sm text-white font-medium">RBAC</span>
+                  <span className="text-xs text-gray-400">Roles</span>
+                </div>
+              </div>
             </div>
             
-            <h1 className="text-4xl md:text-6xl font-bold tracking-tight mb-6">
-              Manage Your
-              <span className="bg-gradient-to-r from-primary to-blue-600 bg-clip-text text-transparent"> Huawei MA5801 </span>
-              OLT with Confidence
-            </h1>
-            
-            <p className="text-lg md:text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
-              A modern, intuitive interface for GPON network operations. Discover, bind, and monitor ONUs with built-in safety guardrails to prevent misconfigurations.
-            </p>
-            
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link href="/login">
-                <Button size="lg" className="w-full sm:w-auto text-base px-8" data-testid="button-hero-login">
-                  Get Started
-                  <ChevronRight className="ml-2 h-5 w-5" />
-                </Button>
-              </Link>
-              <Button size="lg" variant="outline" className="w-full sm:w-auto text-base px-8" asChild>
-                <a href="#features">
-                  <Eye className="mr-2 h-5 w-5" />
-                  View Features
-                </a>
-              </Button>
+            {/* Right Side - Dashboard Mockups */}
+            <div className="relative hidden lg:block">
+              {/* Main Dashboard */}
+              <div className="relative z-10">
+                <div className="bg-white rounded-xl shadow-2xl overflow-hidden border border-white/20">
+                  <div className="bg-gray-100 px-4 py-2 flex items-center gap-2">
+                    <div className="flex gap-1.5">
+                      <div className="w-3 h-3 rounded-full bg-red-400" />
+                      <div className="w-3 h-3 rounded-full bg-yellow-400" />
+                      <div className="w-3 h-3 rounded-full bg-green-400" />
+                    </div>
+                    <div className="flex-1 flex justify-center">
+                      <div className="bg-white rounded px-3 py-0.5 text-xs text-gray-500">
+                        olt-manager.app/dashboard
+                      </div>
+                    </div>
+                  </div>
+                  <img 
+                    src={dashboardMockup} 
+                    alt="OLT Manager Dashboard" 
+                    className="w-full"
+                  />
+                </div>
+              </div>
+              
+              {/* Floating Widget - Top Right */}
+              <div className="absolute -top-4 -right-4 z-20 animate-float">
+                <div className="bg-white rounded-lg shadow-xl p-2 border">
+                  <div className="text-xs text-blue-600 font-medium px-2 py-1 bg-blue-50 rounded-full text-center">
+                    Actionable Insights
+                  </div>
+                </div>
+              </div>
+              
+              {/* Floating Chart Widget - Left */}
+              <div className="absolute top-1/3 -left-8 z-20 animate-float-delayed">
+                <div className="bg-white rounded-xl shadow-xl overflow-hidden w-40">
+                  <img 
+                    src={dashboardWidget} 
+                    alt="Analytics Widget" 
+                    className="w-full"
+                  />
+                </div>
+              </div>
+              
+              {/* Floating Chat Widget - Bottom Right */}
+              <div className="absolute -bottom-4 right-8 z-20 animate-float">
+                <div className="bg-white rounded-xl shadow-xl overflow-hidden w-48">
+                  <img 
+                    src={chatWidget} 
+                    alt="Support Chat" 
+                    className="w-full"
+                  />
+                </div>
+              </div>
+              
+              {/* Status Badge - Top Left */}
+              <div className="absolute top-1/4 left-4 z-20 animate-float-delayed">
+                <div className="bg-green-100 text-green-700 text-xs font-medium px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                  Increase trust & visibility
+                </div>
+              </div>
             </div>
           </div>
+        </div>
+        
+        {/* Wave Separator */}
+        <div className="absolute bottom-0 left-0 right-0">
+          <svg viewBox="0 0 1440 120" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full">
+            <path d="M0 120L60 105C120 90 240 60 360 45C480 30 600 30 720 37.5C840 45 960 60 1080 67.5C1200 75 1320 75 1380 75L1440 75V120H1380C1320 120 1200 120 1080 120C960 120 840 120 720 120C600 120 480 120 360 120C240 120 120 120 60 120H0Z" className="fill-background"/>
+          </svg>
         </div>
       </section>
 
       {/* Stats Section */}
-      <section className="border-y bg-muted/30">
+      <section className="border-b bg-background">
         <div className="container mx-auto px-4 py-12">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
             <div className="text-center">
@@ -175,7 +296,7 @@ export default function LandingPage() {
       </section>
 
       {/* Capabilities Section */}
-      <section className="bg-muted/30 border-y">
+      <section id="capabilities" className="bg-muted/30 border-y">
         <div className="container mx-auto px-4 py-20">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div>
@@ -198,7 +319,7 @@ export default function LandingPage() {
               </div>
             </div>
             
-            <div className="relative">
+            <div id="demo" className="relative">
               <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-blue-500/20 rounded-2xl blur-3xl" />
               <Card className="relative border-2">
                 <CardContent className="p-6">
@@ -278,6 +399,25 @@ export default function LandingPage() {
           </div>
         </div>
       </footer>
+
+      {/* Animation Styles */}
+      <style>{`
+        @keyframes float {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-10px); }
+        }
+        @keyframes float-delayed {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-8px); }
+        }
+        .animate-float {
+          animation: float 4s ease-in-out infinite;
+        }
+        .animate-float-delayed {
+          animation: float-delayed 5s ease-in-out infinite;
+          animation-delay: 1s;
+        }
+      `}</style>
     </div>
   );
 }
