@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import type { BoundOnu } from "@shared/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -64,9 +64,10 @@ export default function BoundOnuPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
-  const { data: boundOnus = [], isLoading } = useQuery<BoundOnu[]>({
+  const { data: boundOnus = [], isLoading, isFetching } = useQuery<BoundOnu[]>({
     queryKey: ["/api/onu/bound"],
     refetchOnWindowFocus: false, // Don't refetch when switching tabs
+    placeholderData: keepPreviousData, // Keep previous data visible while refetching
   });
 
   const { data: refreshStatus } = useQuery<{ lastRefreshed: string | null; inProgress: boolean; error: string | null }>({
