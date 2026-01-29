@@ -971,26 +971,95 @@ export class HuaweiSSH {
     const onus: UnboundOnu[] = [];
     const lines = output.split("\n");
     
-    // Track current port from section headers (e.g., "Port: 0/1/15" or "F/S/P: 0/1/15")
+    // Track current ONU data for block format parsing
     let currentPort = defaultPort;
+    let currentSn: string | null = null;
+    let currentPassword: string | null = null;
+    let currentEquipmentId: string | null = null;
+    let currentVendorId: string | null = null;
+    let currentSoftwareVersion: string | null = null;
 
     console.log("[SSH] Parsing autofind output, lines:", lines.length);
     console.log("[SSH] Raw autofind output:", output.substring(0, 1000));
+
+    // Helper to finalize current ONU block
+    const finalizeOnu = () => {
+      if (currentSn && !onus.find(o => o.serialNumber === currentSn)) {
+        const vendorId = currentVendorId || this.extractVendorId(currentSn);
+        onus.push({
+          id: currentSn,
+          serialNumber: currentSn,
+          gponPort: currentPort,
+          equipmentId: currentEquipmentId || "Unknown",
+          vendorId: vendorId,
+          softwareVersion: currentSoftwareVersion || undefined,
+          password: currentPassword || undefined,
+          discoveredAt: new Date().toISOString(),
+        });
+        console.log(`[SSH] Parsed unbound ONU: SN=${currentSn}, Port=${currentPort}, Vendor=${vendorId}, Password=${currentPassword ? "present" : "none"}`);
+      }
+      // Reset for next ONU
+      currentSn = null;
+      currentPassword = null;
+      currentEquipmentId = null;
+      currentVendorId = null;
+      currentSoftwareVersion = null;
+    };
 
     for (const line of lines) {
       const trimmedLine = line.trim();
       const parts = trimmedLine.split(/\s+/);
       
-      // Check for section header with port (updates currentPort for subsequent lines)
-      // Example: "Port: 0/1/15" or "F/S/P: 0/1/15" or "Port  0/1/15"
-      const portHeaderMatch = trimmedLine.match(/(?:Port|F\/S\/P)\s*[:\s]\s*(\d+)\/\s*(\d+)\/(\d+)/i);
-      if (portHeaderMatch) {
-        currentPort = `${portHeaderMatch[1]}/${portHeaderMatch[2]}/${portHeaderMatch[3]}`;
-        console.log(`[SSH] Section port header found: ${currentPort}`);
+      // Detect new ONU block (Number : X)
+      if (trimmedLine.match(/^Number\s*:\s*\d+/i)) {
+        finalizeOnu(); // Save previous ONU if any
         continue;
       }
       
-      // Format 1: Port as first column
+      // Block format: F/S/P : 0/1/0
+      const portMatch = trimmedLine.match(/^F\/S\/P\s*:\s*(\d+)\/\s*(\d+)\/(\d+)/i);
+      if (portMatch) {
+        currentPort = `${portMatch[1]}/${portMatch[2]}/${portMatch[3]}`;
+        continue;
+      }
+      
+      // Block format: Ont SN : 5A544547CC9ABB09 (ZTEG-CC9ABB09)
+      const snLineMatch = trimmedLine.match(/^Ont\s+SN\s*:\s*([A-Fa-f0-9]{16})/i);
+      if (snLineMatch) {
+        currentSn = snLineMatch[1].toUpperCase();
+        continue;
+      }
+      
+      // Block format: Password : 0x4743433941424230390(GCC9ABB09)
+      // Extract the hex password (0x...) for binding
+      const passwordMatch = trimmedLine.match(/^Password\s*:\s*(0x[A-Fa-f0-9]+)/i);
+      if (passwordMatch) {
+        currentPassword = passwordMatch[1];
+        continue;
+      }
+      
+      // Block format: VendorID : ZTEG
+      const vendorMatch = trimmedLine.match(/^VendorID\s*:\s*(\S+)/i);
+      if (vendorMatch) {
+        currentVendorId = vendorMatch[1].trim();
+        continue;
+      }
+      
+      // Block format: Ont EquipmentID : F609V5.3
+      const equipIdMatch = trimmedLine.match(/^Ont\s+EquipmentID\s*:\s*(\S+)/i);
+      if (equipIdMatch) {
+        currentEquipmentId = equipIdMatch[1].trim();
+        continue;
+      }
+      
+      // Block format: Ont SoftwareVersion : V7.0.10P2N3
+      const softVerMatch = trimmedLine.match(/^Ont\s+SoftwareVersion\s*:\s*(\S+)/i);
+      if (softVerMatch) {
+        currentSoftwareVersion = softVerMatch[1].trim();
+        continue;
+      }
+      
+      // Legacy Format 1: Port as first column
       // Example: 0/1/15  48575443XXXXXXXX  HG8310M  ...
       if (parts.length >= 2 && /^\d+\/\d+\/\d+$/.test(parts[0])) {
         const port = parts[0];
@@ -999,32 +1068,6 @@ export class HuaweiSSH {
         if (sn && /^[A-Fa-f0-9]{16}$/.test(sn)) {
           const equipmentId = parts[2] || "Unknown";
           const softwareVersion = parts[4] || undefined;
-          // Extract vendor ID from first 4 chars of SN (e.g., ZTEG, HWTC)
-          const vendorId = this.extractVendorId(sn);
-          
-          onus.push({
-            id: sn.toUpperCase(),
-            serialNumber: sn.toUpperCase(),
-            gponPort: port,
-            equipmentId: equipmentId,
-            vendorId: vendorId,
-            softwareVersion: softwareVersion,
-            discoveredAt: new Date().toISOString(),
-          });
-          console.log(`[SSH] Parsed unbound ONU: SN=${sn}, Port=${port}, Vendor=${vendorId}`);
-          continue;
-        }
-      }
-      
-      // Format 2: Number  F/S/P  SN  ... (port in second column)
-      // Example: 1  0/1/15  48575443XXXXXXXX  HG8310M  ...
-      if (parts.length >= 3 && /^\d+$/.test(parts[0]) && /^\d+\/\d+\/\d+$/.test(parts[1])) {
-        const port = parts[1];
-        const sn = parts[2];
-        
-        if (sn && /^[A-Fa-f0-9]{16}$/.test(sn)) {
-          const equipmentId = parts[3] || "Unknown";
-          const softwareVersion = parts[5] || undefined;
           const vendorId = this.extractVendorId(sn);
           
           if (!onus.find(o => o.serialNumber === sn.toUpperCase())) {
@@ -1037,75 +1080,38 @@ export class HuaweiSSH {
               softwareVersion: softwareVersion,
               discoveredAt: new Date().toISOString(),
             });
-            console.log(`[SSH] Parsed unbound ONU (format 2): SN=${sn}, Port=${port}, Vendor=${vendorId}`);
+            console.log(`[SSH] Parsed unbound ONU (tabular): SN=${sn}, Port=${port}, Vendor=${vendorId}`);
           }
           continue;
         }
       }
       
-      // Format 3: Number  0/ 1/15  SN  ... (port with spaces - Huawei quirk)
-      // Example: 1  0/ 1/15  48575443XXXXXXXX  HG8310M  ...
-      const spacedPortMatch = trimmedLine.match(/^\s*(\d+)\s+(\d+)\/\s*(\d+)\/(\d+)\s+([A-Fa-f0-9]{16})\s+(\S+)?/i);
-      if (spacedPortMatch) {
-        const port = `${spacedPortMatch[2]}/${spacedPortMatch[3]}/${spacedPortMatch[4]}`;
-        const sn = spacedPortMatch[5].toUpperCase();
-        const equipmentId = spacedPortMatch[6] || "Unknown";
-        const vendorId = this.extractVendorId(sn);
+      // Legacy Format 2: Number  F/S/P  SN  ...
+      if (parts.length >= 3 && /^\d+$/.test(parts[0]) && /^\d+\/\d+\/\d+$/.test(parts[1])) {
+        const port = parts[1];
+        const sn = parts[2];
         
-        if (!onus.find(o => o.serialNumber === sn)) {
-          onus.push({
-            id: sn,
-            serialNumber: sn,
-            gponPort: port,
-            equipmentId: equipmentId,
-            vendorId: vendorId,
-            discoveredAt: new Date().toISOString(),
-          });
-          console.log(`[SSH] Parsed unbound ONU (spaced port): SN=${sn}, Port=${port}, Vendor=${vendorId}`);
-        }
-        continue;
-      }
-      
-      // Format 4: Just SN with port context from section header
-      // Look for SN patterns in line
-      const snMatch = trimmedLine.match(/SN\s*[:\s]\s*([A-Fa-f0-9]{16})/i);
-      if (snMatch) {
-        const sn = snMatch[1].toUpperCase();
-        const vendorId = this.extractVendorId(sn);
-        if (!onus.find(o => o.serialNumber === sn)) {
-          onus.push({
-            id: sn,
-            serialNumber: sn,
-            gponPort: currentPort,
-            equipmentId: "Unknown",
-            vendorId: vendorId,
-            discoveredAt: new Date().toISOString(),
-          });
-          console.log(`[SSH] Parsed unbound ONU (SN pattern): SN=${sn}, Port=${currentPort}, Vendor=${vendorId}`);
-        }
-        continue;
-      }
-
-      // Format 5: Number  SN  (line with just index and SN, no port in line)
-      // Example: 1      48575443XXXXXXXX
-      // This happens when the port is shown in a header section
-      const indexSnMatch = trimmedLine.match(/^(\d+)\s+([A-Fa-f0-9]{16})$/i);
-      if (indexSnMatch) {
-        const sn = indexSnMatch[2].toUpperCase();
-        const vendorId = this.extractVendorId(sn);
-        if (!onus.find(o => o.serialNumber === sn)) {
-          onus.push({
-            id: sn,
-            serialNumber: sn,
-            gponPort: currentPort,
-            equipmentId: "Unknown",
-            vendorId: vendorId,
-            discoveredAt: new Date().toISOString(),
-          });
-          console.log(`[SSH] Parsed unbound ONU (index+SN): SN=${sn}, Port=${currentPort}, Vendor=${vendorId}`);
+        if (sn && /^[A-Fa-f0-9]{16}$/.test(sn)) {
+          const equipmentId = parts[3] || "Unknown";
+          const vendorId = this.extractVendorId(sn);
+          
+          if (!onus.find(o => o.serialNumber === sn.toUpperCase())) {
+            onus.push({
+              id: sn.toUpperCase(),
+              serialNumber: sn.toUpperCase(),
+              gponPort: port,
+              equipmentId: equipmentId,
+              vendorId: vendorId,
+              discoveredAt: new Date().toISOString(),
+            });
+          }
+          continue;
         }
       }
     }
+    
+    // Finalize last ONU if any
+    finalizeOnu();
 
     console.log(`[SSH] Parsed ${onus.length} unbound ONUs total`);
     return onus;
@@ -1761,6 +1767,7 @@ export class HuaweiSSH {
     wifiSsid?: string;
     wifiPassword?: string;
     enableRemoteAccess?: boolean;
+    onuPassword?: string; // Hex password from autofind for general ONUs (e.g., "0x4743433941424230390")
   }): Promise<{ success: boolean; message: string; wifiSsid?: string; wifiPassword?: string }> {
     if (!this.isConnected()) {
       return { success: false, message: "Not connected to OLT" };
@@ -1777,7 +1784,8 @@ export class HuaweiSSH {
       const { 
         serialNumber, gponPort, onuId, lineProfileName, serviceProfileName, 
         description, vlanId, gemportId, pppoeUsername, pppoePassword, 
-        onuType = "huawei", wifiSsid, wifiPassword, enableRemoteAccess = true 
+        onuType = "huawei", wifiSsid, wifiPassword, enableRemoteAccess = true,
+        onuPassword
       } = params;
       
       // Default WiFi credentials - fixed names for all ONUs
@@ -1810,16 +1818,23 @@ export class HuaweiSSH {
 
       // Step 3: Add the ONT
       // Huawei ONU: uses "omci" for OMCI management binding
-      // General ONU: no "omci" - ONU is registered but config done manually via ONU web interface
+      // General ONU: uses password-auth with hex password from autofind (no OMCI)
       let addCmd: string;
       if (isGeneral) {
-        // General ONU - register without OMCI binding (manual configuration via ONU web interface)
+        // General ONU - register with password-auth (manual configuration via ONU web interface)
+        // Command: ont add 0 1 sn-auth [SN] password-auth [hex password] omci ont-lineprofile-name [profile] ont-srvprofile-name [profile] desc "DESCRIPTION"
         addCmd = "ont add " + slotPort + 
-          " sn-auth " + serialNumber + 
-          " ont-lineprofile-name " + lineProfileName + 
+          " sn-auth " + serialNumber;
+        
+        // Add password-auth if password is provided from autofind
+        if (onuPassword) {
+          addCmd += " password-auth " + onuPassword;
+        }
+        
+        addCmd += " omci ont-lineprofile-name " + lineProfileName + 
           " ont-srvprofile-name " + serviceProfileName + 
           " desc " + description.replace(/\s+/g, "_").substring(0, 32);
-        console.log(`[SSH] Step 3: Adding General ONU (no OMCI) with: ${addCmd}`);
+        console.log(`[SSH] Step 3: Adding General ONU with: ${addCmd.replace(onuPassword || "", "****")}`);
       } else {
         // Huawei ONU - standard OMCI binding
         addCmd = "ont add " + slotPort + 

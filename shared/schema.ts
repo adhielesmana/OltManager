@@ -140,6 +140,7 @@ export const unboundOnus = pgTable("unbound_onus", {
   equipmentId: text("equipment_id"),
   vendorId: text("vendor_id"),
   softwareVersion: text("software_version"),
+  password: text("password"), // Hex password from autofind (e.g., "0x4743433941424230390")
   oltCredentialId: integer("olt_credential_id").notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -266,6 +267,7 @@ export const unboundOnuSchema = z.object({
   equipmentId: z.string().optional(),
   vendorId: z.string().optional(),
   softwareVersion: z.string().optional(),
+  password: z.string().optional(), // Hex password from autofind for binding
 });
 export type UnboundOnu = z.infer<typeof unboundOnuSchema>;
 
@@ -335,6 +337,7 @@ export const bindOnuRequestSchema = z.object({
   pppoeUsername: z.string().optional(),
   pppoePassword: z.string().optional(),
   onuType: onuTypeSchema.default("huawei"),
+  onuPassword: z.string().optional(), // Hex password from autofind for general ONUs
 });
 export type BindOnuRequest = z.infer<typeof bindOnuRequestSchema>;
 

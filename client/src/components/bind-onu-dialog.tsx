@@ -179,8 +179,14 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
       return;
     }
     
+    // For general ONUs, include the password from autofind
+    const bindData: BindOnuRequest = {
+      ...data,
+      onuPassword: selectedOnu?.password || undefined,
+    };
+    
     // Start binding in background
-    bindMutation.mutate(data);
+    bindMutation.mutate(bindData);
     
     // Close dialog immediately and show toast
     toast({

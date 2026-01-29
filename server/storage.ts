@@ -238,6 +238,7 @@ export class DatabaseStorage implements IStorage {
       equipmentId: dbOnu.equipmentId || undefined,
       vendorId: dbOnu.vendorId || undefined,
       softwareVersion: dbOnu.softwareVersion || undefined,
+      password: dbOnu.password || undefined, // Hex password for binding general ONUs
     };
   }
 
@@ -724,6 +725,7 @@ export class DatabaseStorage implements IStorage {
             equipmentId: onu.equipmentId || null,
             vendorId: onu.vendorId || null,
             softwareVersion: onu.softwareVersion || null,
+            password: onu.password || null, // Hex password for binding general ONUs
             oltCredentialId: credential.id,
           }))
         );
@@ -1349,6 +1351,7 @@ export class DatabaseStorage implements IStorage {
             pppoeUsername: request.pppoeUsername,
             pppoePassword: request.pppoePassword,
             onuType: request.onuType || "huawei",
+            onuPassword: request.onuPassword, // Hex password for general ONUs
           });
           
           if (bindResult.success) {
