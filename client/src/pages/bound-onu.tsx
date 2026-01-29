@@ -287,27 +287,41 @@ export default function BoundOnuPage() {
                           {onu.description}
                         </TableCell>
                         <TableCell className="text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" data-testid={`button-menu-${onu.serialNumber}`}>
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleDetailsClick(onu)} data-testid={`menu-details-${onu.serialNumber}`}>
-                                <Eye className="h-4 w-4 mr-2" />
-                                View Details
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
+                          <div className="flex items-center justify-end gap-1">
+                            {(onu.status === "offline" || onu.status === "los") && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => handleUnbindClick(onu)}
-                                className="text-destructive focus:text-destructive"
-                                data-testid={`menu-unbind-${onu.serialNumber}`}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                title="Remove orphan ONU"
+                                data-testid={`button-remove-orphan-${onu.serialNumber}`}
                               >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Unbind
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" data-testid={`button-menu-${onu.serialNumber}`}>
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleDetailsClick(onu)} data-testid={`menu-details-${onu.serialNumber}`}>
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  View Details
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => handleUnbindClick(onu)}
+                                  className="text-destructive focus:text-destructive"
+                                  data-testid={`menu-unbind-${onu.serialNumber}`}
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Unbind
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
