@@ -11,6 +11,7 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Loader2, LogOut } from "lucide-react";
 import NotFound from "@/pages/not-found";
+import LandingPage from "@/pages/landing";
 import LoginPage from "@/pages/login";
 import UnboundOnuPage from "@/pages/unbound-onu";
 import BoundOnuPage from "@/pages/bound-onu";
@@ -32,7 +33,7 @@ function ProtectedRoute({ component: Component, requireAdmin = false }: { compon
   }
 
   if (!user) {
-    setLocation("/login");
+    setLocation("/");
     return null;
   }
 
@@ -64,9 +65,12 @@ function Router() {
   return (
     <Switch>
       <Route path="/login">
-        {user ? <Redirect to="/" /> : <LoginPage />}
+        {user ? <Redirect to="/dashboard" /> : <LoginPage />}
       </Route>
       <Route path="/">
+        {user ? <Redirect to="/dashboard" /> : <LandingPage />}
+      </Route>
+      <Route path="/dashboard">
         <ProtectedRoute component={UnboundOnuPage} />
       </Route>
       <Route path="/unbound">

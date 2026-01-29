@@ -33,7 +33,7 @@ import type { OltInfo } from "@shared/schema";
 const discoveryItems = [
   {
     title: "Unbound ONU",
-    url: "/",
+    url: "/dashboard",
     icon: Link2Off,
     description: "Discovered but not configured",
   },
@@ -150,7 +150,7 @@ export function AppSidebar() {
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild
-                    isActive={location === item.url || (item.url === "/" && location === "/unbound")}
+                    isActive={location === item.url || (item.url === "/dashboard" && location === "/unbound")}
                   >
                     <Link href={item.url} data-testid={`link-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
                       <item.icon className="h-4 w-4" />
