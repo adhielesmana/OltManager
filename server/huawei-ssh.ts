@@ -894,6 +894,27 @@ export class HuaweiSSH {
     }
   }
 
+  // Extract vendor ID from serial number (first 4 characters converted to ASCII)
+  // E.g., "48575443XXXXXXXX" -> "HWTC" (Huawei), "5A544547XXXXXXXX" -> "ZTEG" (ZTE)
+  private extractVendorId(serialNumber: string): string {
+    if (!serialNumber || serialNumber.length < 8) return "Unknown";
+    
+    try {
+      // First 8 hex chars = 4 ASCII characters (vendor ID)
+      const hexVendor = serialNumber.substring(0, 8);
+      let vendor = "";
+      for (let i = 0; i < 8; i += 2) {
+        const charCode = parseInt(hexVendor.substring(i, i + 2), 16);
+        if (charCode >= 32 && charCode <= 126) { // Printable ASCII
+          vendor += String.fromCharCode(charCode);
+        }
+      }
+      return vendor || "Unknown";
+    } catch {
+      return "Unknown";
+    }
+  }
+
   private parseUnboundOnus(output: string, defaultPort: string = "0/0/0"): UnboundOnu[] {
     const onus: UnboundOnu[] = [];
     const lines = output.split("\n");
@@ -926,16 +947,19 @@ export class HuaweiSSH {
         if (sn && /^[A-Fa-f0-9]{16}$/.test(sn)) {
           const equipmentId = parts[2] || "Unknown";
           const softwareVersion = parts[4] || undefined;
+          // Extract vendor ID from first 4 chars of SN (e.g., ZTEG, HWTC)
+          const vendorId = this.extractVendorId(sn);
           
           onus.push({
             id: sn.toUpperCase(),
             serialNumber: sn.toUpperCase(),
             gponPort: port,
             equipmentId: equipmentId,
+            vendorId: vendorId,
             softwareVersion: softwareVersion,
             discoveredAt: new Date().toISOString(),
           });
-          console.log(`[SSH] Parsed unbound ONU: SN=${sn}, Port=${port}`);
+          console.log(`[SSH] Parsed unbound ONU: SN=${sn}, Port=${port}, Vendor=${vendorId}`);
           continue;
         }
       }
@@ -949,6 +973,7 @@ export class HuaweiSSH {
         if (sn && /^[A-Fa-f0-9]{16}$/.test(sn)) {
           const equipmentId = parts[3] || "Unknown";
           const softwareVersion = parts[5] || undefined;
+          const vendorId = this.extractVendorId(sn);
           
           if (!onus.find(o => o.serialNumber === sn.toUpperCase())) {
             onus.push({
@@ -956,10 +981,11 @@ export class HuaweiSSH {
               serialNumber: sn.toUpperCase(),
               gponPort: port,
               equipmentId: equipmentId,
+              vendorId: vendorId,
               softwareVersion: softwareVersion,
               discoveredAt: new Date().toISOString(),
             });
-            console.log(`[SSH] Parsed unbound ONU (format 2): SN=${sn}, Port=${port}`);
+            console.log(`[SSH] Parsed unbound ONU (format 2): SN=${sn}, Port=${port}, Vendor=${vendorId}`);
           }
           continue;
         }
@@ -972,6 +998,7 @@ export class HuaweiSSH {
         const port = `${spacedPortMatch[2]}/${spacedPortMatch[3]}/${spacedPortMatch[4]}`;
         const sn = spacedPortMatch[5].toUpperCase();
         const equipmentId = spacedPortMatch[6] || "Unknown";
+        const vendorId = this.extractVendorId(sn);
         
         if (!onus.find(o => o.serialNumber === sn)) {
           onus.push({
@@ -979,9 +1006,10 @@ export class HuaweiSSH {
             serialNumber: sn,
             gponPort: port,
             equipmentId: equipmentId,
+            vendorId: vendorId,
             discoveredAt: new Date().toISOString(),
           });
-          console.log(`[SSH] Parsed unbound ONU (spaced port): SN=${sn}, Port=${port}`);
+          console.log(`[SSH] Parsed unbound ONU (spaced port): SN=${sn}, Port=${port}, Vendor=${vendorId}`);
         }
         continue;
       }
@@ -991,15 +1019,17 @@ export class HuaweiSSH {
       const snMatch = trimmedLine.match(/SN\s*[:\s]\s*([A-Fa-f0-9]{16})/i);
       if (snMatch) {
         const sn = snMatch[1].toUpperCase();
+        const vendorId = this.extractVendorId(sn);
         if (!onus.find(o => o.serialNumber === sn)) {
           onus.push({
             id: sn,
             serialNumber: sn,
             gponPort: currentPort,
             equipmentId: "Unknown",
+            vendorId: vendorId,
             discoveredAt: new Date().toISOString(),
           });
-          console.log(`[SSH] Parsed unbound ONU (SN pattern): SN=${sn}, Port=${currentPort}`);
+          console.log(`[SSH] Parsed unbound ONU (SN pattern): SN=${sn}, Port=${currentPort}, Vendor=${vendorId}`);
         }
         continue;
       }
@@ -1010,15 +1040,17 @@ export class HuaweiSSH {
       const indexSnMatch = trimmedLine.match(/^(\d+)\s+([A-Fa-f0-9]{16})$/i);
       if (indexSnMatch) {
         const sn = indexSnMatch[2].toUpperCase();
+        const vendorId = this.extractVendorId(sn);
         if (!onus.find(o => o.serialNumber === sn)) {
           onus.push({
             id: sn,
             serialNumber: sn,
             gponPort: currentPort,
             equipmentId: "Unknown",
+            vendorId: vendorId,
             discoveredAt: new Date().toISOString(),
           });
-          console.log(`[SSH] Parsed unbound ONU (index+SN): SN=${sn}, Port=${currentPort}`);
+          console.log(`[SSH] Parsed unbound ONU (index+SN): SN=${sn}, Port=${currentPort}, Vendor=${vendorId}`);
         }
       }
     }
@@ -1066,15 +1098,33 @@ export class HuaweiSSH {
           
           // Get optical info for all bound ONUs on this slot
           if (slotOnus.length > 0) {
-            // Get optical info per port
-            for (let port = 0; port < portsPerSlot; port++) {
-              const portOnus = slotOnus.filter(o => o.gponPort === `0/${slot}/${port}`);
-              if (portOnus.length > 0) {
-                try {
-                  const opticalOutput = await this.executeCommandWithDelay(`display ont optical-info ${port} all`, 500);
-                  this.enrichWithOpticalInfo(portOnus, opticalOutput);
-                } catch (err) {
-                  // Continue if optical info fails
+            // Try to get optical info for entire interface first (more efficient)
+            let opticalSuccess = false;
+            try {
+              const opticalOutput = await this.executeCommandWithDelay("display ont optical-info all", 800);
+              // Check if command was successful (no error message)
+              if (!opticalOutput.includes("Unknown command") && !opticalOutput.includes("Error:")) {
+                this.enrichWithOpticalInfo(slotOnus, opticalOutput);
+                opticalSuccess = true;
+              }
+            } catch (err) {
+              console.log(`[SSH] Optical info all-ports failed: ${err}`);
+            }
+            
+            // Fallback: try per-port queries if all-ports failed
+            if (!opticalSuccess) {
+              console.log(`[SSH] Trying per-port optical info queries for slot ${slot}`);
+              for (let port = 0; port < portsPerSlot; port++) {
+                const portOnus = slotOnus.filter(o => o.gponPort === `0/${slot}/${port}`);
+                if (portOnus.length > 0) {
+                  try {
+                    const opticalOutput = await this.executeCommandWithDelay(`display ont optical-info ${port} all`, 500);
+                    if (!opticalOutput.includes("Unknown command")) {
+                      this.enrichWithOpticalInfo(portOnus, opticalOutput);
+                    }
+                  } catch (err) {
+                    // Continue if optical info fails
+                  }
                 }
               }
             }

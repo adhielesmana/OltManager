@@ -138,6 +138,7 @@ export const unboundOnus = pgTable("unbound_onus", {
   gponPort: text("gpon_port").notNull(),
   discoveredAt: timestamp("discovered_at").notNull(),
   equipmentId: text("equipment_id"),
+  vendorId: text("vendor_id"),
   softwareVersion: text("software_version"),
   oltCredentialId: integer("olt_credential_id").notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -263,6 +264,7 @@ export const unboundOnuSchema = z.object({
   gponPort: z.string(),
   discoveredAt: z.string(),
   equipmentId: z.string().optional(),
+  vendorId: z.string().optional(),
   softwareVersion: z.string().optional(),
 });
 export type UnboundOnu = z.infer<typeof unboundOnuSchema>;

@@ -175,6 +175,7 @@ export default function UnboundOnuPage() {
                   <TableRow>
                     <TableHead>Serial Number</TableHead>
                     <TableHead>GPON Port</TableHead>
+                    <TableHead>Vendor</TableHead>
                     <TableHead>Equipment ID</TableHead>
                     <TableHead>Discovered</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -188,11 +189,6 @@ export default function UnboundOnuPage() {
                           <code className="font-mono text-sm bg-muted px-1.5 py-0.5 rounded">
                             {onu.serialNumber}
                           </code>
-                          {onu.equipmentId && onu.equipmentId !== "Unknown" && (
-                            <Badge variant="secondary" className="text-xs font-medium">
-                              {onu.equipmentId}
-                            </Badge>
-                          )}
                           <Badge variant="outline" className="bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20 text-xs">
                             New
                           </Badge>
@@ -201,8 +197,17 @@ export default function UnboundOnuPage() {
                       <TableCell>
                         <code className="font-mono text-sm">{onu.gponPort}</code>
                       </TableCell>
+                      <TableCell>
+                        {onu.vendorId && onu.vendorId !== "Unknown" ? (
+                          <Badge variant="secondary" className="text-xs font-medium">
+                            {onu.vendorId}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {onu.equipmentId || "-"}
+                        {onu.equipmentId && onu.equipmentId !== "Unknown" ? onu.equipmentId : "-"}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {formatDistanceToNow(new Date(onu.discoveredAt), { addSuffix: true })}

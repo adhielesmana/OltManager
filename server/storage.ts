@@ -236,6 +236,7 @@ export class DatabaseStorage implements IStorage {
       gponPort: dbOnu.gponPort,
       discoveredAt: dbOnu.discoveredAt.toISOString(),
       equipmentId: dbOnu.equipmentId || undefined,
+      vendorId: dbOnu.vendorId || undefined,
       softwareVersion: dbOnu.softwareVersion || undefined,
     };
   }
@@ -721,6 +722,7 @@ export class DatabaseStorage implements IStorage {
             gponPort: onu.gponPort,
             discoveredAt: new Date(onu.discoveredAt),
             equipmentId: onu.equipmentId || null,
+            vendorId: onu.vendorId || null,
             softwareVersion: onu.softwareVersion || null,
             oltCredentialId: credential.id,
           }))
