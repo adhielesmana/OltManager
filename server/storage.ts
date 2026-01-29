@@ -724,28 +724,38 @@ export class DatabaseStorage implements IStorage {
       console.log("[Storage] Refreshing bound ONUs from OLT...");
       const boundList = await huaweiSSH.getBoundOnus();
       
+      // Get existing bound ONUs to preserve PPPoE info
+      const existingOnus = await db.select().from(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id));
+      const existingByKey = new Map(existingOnus.map(o => [`${o.gponPort}-${o.onuId}`, o]));
+      
       // Clear old bound data and insert new
       await db.delete(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id));
       
       if (boundList.length > 0) {
         await db.insert(boundOnus).values(
-          boundList.map(onu => ({
-            onuId: onu.onuId,
-            serialNumber: onu.serialNumber,
-            gponPort: onu.gponPort,
-            description: onu.description || "",
-            lineProfileId: onu.lineProfileId,
-            serviceProfileId: onu.serviceProfileId,
-            status: onu.status,
-            configState: onu.configState,
-            rxPower: onu.rxPower ?? null,
-            txPower: onu.txPower ?? null,
-            distance: onu.distance ?? null,
-            vlanId: onu.vlanId ?? null,
-            gemportId: onu.gemportId ?? null,
-            oltCredentialId: credential.id,
-            boundAt: new Date(onu.boundAt),
-          }))
+          boundList.map(onu => {
+            // Preserve PPPoE info from existing record if available
+            const existing = existingByKey.get(`${onu.gponPort}-${onu.onuId}`);
+            return {
+              onuId: onu.onuId,
+              serialNumber: onu.serialNumber,
+              gponPort: onu.gponPort,
+              description: onu.description || existing?.description || "",
+              lineProfileId: onu.lineProfileId,
+              serviceProfileId: onu.serviceProfileId,
+              status: onu.status,
+              configState: onu.configState,
+              rxPower: onu.rxPower ?? null,
+              txPower: onu.txPower ?? null,
+              distance: onu.distance ?? null,
+              vlanId: onu.vlanId ?? null,
+              gemportId: onu.gemportId ?? null,
+              pppoeUsername: onu.pppoeUsername || existing?.pppoeUsername || null,
+              pppoePassword: existing?.pppoePassword || null, // Password can only come from DB, not OLT
+              oltCredentialId: credential.id,
+              boundAt: existing?.boundAt || new Date(onu.boundAt),
+            };
+          })
         );
       }
       

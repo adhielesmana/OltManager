@@ -730,6 +730,30 @@ export class HuaweiSSH {
       }
     }
   }
+  
+  private parsePppoeConfig(onu: BoundOnu, output: string): void {
+    // Parse PPPoE username from "display ont ipconfig" output
+    // Format varies but look for: user-account username XXX or Username: XXX
+    for (const line of output.split("\n")) {
+      const trimmedLine = line.trim();
+      
+      // Match: user-account username XXXX
+      const usernameMatch = trimmedLine.match(/user-account\s+username\s+(\S+)/i);
+      if (usernameMatch) {
+        onu.pppoeUsername = usernameMatch[1];
+        console.log(`[SSH] Found PPPoE username for ONU ${onu.onuId}: "${onu.pppoeUsername}"`);
+        return;
+      }
+      
+      // Match: Username : XXXX or Username: XXXX
+      const usernameMatch2 = trimmedLine.match(/Username\s*:\s*(\S+)/i);
+      if (usernameMatch2) {
+        onu.pppoeUsername = usernameMatch2[1];
+        console.log(`[SSH] Found PPPoE username for ONU ${onu.onuId}: "${onu.pppoeUsername}"`);
+        return;
+      }
+    }
+  }
 
   async getUnboundOnus(): Promise<UnboundOnu[]> {
     try {
@@ -951,7 +975,7 @@ export class HuaweiSSH {
               }
             }
             
-            // Get descriptions for each ONU (limit to first 50 to avoid timeout)
+            // Get descriptions and PPPoE config for each ONU (limit to first 50 to avoid timeout)
             const onusToEnrich = slotOnus.slice(0, 50);
             for (const onu of onusToEnrich) {
               try {
@@ -959,6 +983,14 @@ export class HuaweiSSH {
                 const portNum = parseInt(portParts[2]) || 0;
                 const detailOutput = await this.executeCommand(`display ont info ${portNum} ${onu.onuId}`);
                 this.parseOnuDescription(onu, detailOutput);
+                
+                // Get PPPoE config
+                try {
+                  const pppoeOutput = await this.executeCommand(`display ont ipconfig ${portNum} ${onu.onuId}`);
+                  this.parsePppoeConfig(onu, pppoeOutput);
+                } catch (pppoeErr) {
+                  // PPPoE config is optional
+                }
               } catch (err) {
                 console.log(`[SSH] Could not get description for ONU ${onu.onuId}`);
               }
