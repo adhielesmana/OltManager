@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Plus, Trash2, Server, Wifi, WifiOff, Settings, Play } from "lucide-react";
+import { Loader2, Plus, Trash2, Server, Wifi, WifiOff, Settings, Play, Pencil } from "lucide-react";
 
 interface OltCredential {
   id: number;
@@ -28,6 +28,8 @@ interface OltCredential {
 export default function OltSettingsPage() {
   const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState("");
   const [host, setHost] = useState("");
   const [port, setPort] = useState("22");
@@ -87,6 +89,24 @@ export default function OltSettingsPage() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: async (data: { id: number; name: string; host: string; port: number; username: string; password?: string; protocol: string }) => {
+      const { id, ...updates } = data;
+      const response = await apiRequest("PATCH", `/api/olt/credentials/${id}`, updates);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/olt/credentials"] });
+      setIsEditDialogOpen(false);
+      setEditingId(null);
+      resetForm();
+      toast({ title: "OLT credential updated successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update OLT credential", description: error.message, variant: "destructive" });
+    },
+  });
+
   const resetForm = () => {
     setName("");
     setHost("");
@@ -105,6 +125,33 @@ export default function OltSettingsPage() {
       password,
       protocol,
     });
+  };
+
+  const handleEdit = (cred: OltCredential) => {
+    setEditingId(cred.id);
+    setName(cred.name);
+    setHost(cred.host);
+    setPort(String(cred.port));
+    setUsername(cred.username);
+    setPassword("");
+    setProtocol(cred.protocol);
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdate = () => {
+    if (!editingId) return;
+    const data: any = {
+      id: editingId,
+      name,
+      host,
+      port: parseInt(port),
+      username,
+      protocol,
+    };
+    if (password) {
+      data.password = password;
+    }
+    updateMutation.mutate(data);
   };
 
   const activeCredential = credentials?.find(c => c.isActive);
@@ -340,6 +387,14 @@ export default function OltSettingsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          onClick={() => handleEdit(cred)}
+                          data-testid={`button-edit-olt-${cred.id}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => deleteMutation.mutate(cred.id)}
                           disabled={deleteMutation.isPending}
                           data-testid={`button-delete-olt-${cred.id}`}
@@ -359,6 +414,111 @@ export default function OltSettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={isEditDialogOpen} onOpenChange={(open) => {
+        setIsEditDialogOpen(open);
+        if (!open) {
+          setEditingId(null);
+          resetForm();
+        }
+      }}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit OLT Connection</DialogTitle>
+            <DialogDescription>
+              Update the OLT connection settings. Leave password blank to keep unchanged.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-olt-name">Connection Name</Label>
+              <Input
+                id="edit-olt-name"
+                data-testid="input-edit-olt-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g., Main OLT - Site A"
+              />
+            </div>
+            
+            <div className="grid grid-cols-3 gap-4">
+              <div className="col-span-2 space-y-2">
+                <Label htmlFor="edit-olt-host">Host / IP Address</Label>
+                <Input
+                  id="edit-olt-host"
+                  data-testid="input-edit-olt-host"
+                  value={host}
+                  onChange={(e) => setHost(e.target.value)}
+                  placeholder="192.168.1.1"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-olt-port">Port</Label>
+                <Input
+                  id="edit-olt-port"
+                  data-testid="input-edit-olt-port"
+                  type="number"
+                  value={port}
+                  onChange={(e) => setPort(e.target.value)}
+                  placeholder="22"
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="edit-olt-protocol">Protocol</Label>
+              <Select value={protocol} onValueChange={setProtocol}>
+                <SelectTrigger data-testid="select-edit-olt-protocol">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ssh">SSH</SelectItem>
+                  <SelectItem value="telnet">Telnet</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="edit-olt-username">Username</Label>
+              <Input
+                id="edit-olt-username"
+                data-testid="input-edit-olt-username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="admin"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="edit-olt-password">Password</Label>
+              <Input
+                id="edit-olt-password"
+                data-testid="input-edit-olt-password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Leave blank to keep unchanged"
+              />
+              <p className="text-xs text-muted-foreground">Leave blank to keep the current password</p>
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleUpdate} 
+              disabled={updateMutation.isPending || !name || !host || !username}
+              data-testid="button-update-olt"
+            >
+              {updateMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Update
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -273,6 +273,26 @@ export async function registerRoutes(
     }
   });
   
+  app.patch("/api/olt/credentials/:id", requireAuth, requirePermission("olt:configure"), async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id));
+      const { name, host, port, username, password, protocol } = req.body;
+      
+      const updates: any = {};
+      if (name !== undefined) updates.name = name;
+      if (host !== undefined) updates.host = host;
+      if (port !== undefined) updates.port = port;
+      if (username !== undefined) updates.username = username;
+      if (password !== undefined) updates.password = password;
+      if (protocol !== undefined) updates.protocol = protocol;
+      
+      const updated = await storage.updateOltCredential(id, updates);
+      res.json(updated);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update OLT credential" });
+    }
+  });
+
   app.delete("/api/olt/credentials/:id", requireAuth, requirePermission("olt:configure"), async (req, res) => {
     try {
       const id = parseInt(String(req.params.id));
