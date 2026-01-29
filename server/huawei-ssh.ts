@@ -2054,9 +2054,14 @@ export class HuaweiSSH {
       // Step 1: Ensure we're in config mode (enable -> config)
       console.log(`[SSH] Step 1: Entering config mode...`);
       await this.executeCommand("quit");
-      await this.executeCommand("quit"); // Double quit to ensure we're at base
+      await new Promise(resolve => setTimeout(resolve, 300));
+      await this.executeCommand("quit");
+      await new Promise(resolve => setTimeout(resolve, 300));
       await this.executeCommand("enable");
-      await this.executeCommand("config");
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const configResult = await this.executeCommand("config");
+      console.log(`[SSH] Config mode result: ${configResult.substring(0, 100)}`);
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       // Step 2: Delete all service ports for this ONU using single command
       // Format: undo service-port port F/S/P ont OnuID
@@ -2064,20 +2069,20 @@ export class HuaweiSSH {
       console.log(`[SSH] Step 2: Deleting service ports with: ${undoSpCmd}`);
       const undoSpResult = await this.executeCommand(undoSpCmd);
       console.log(`[SSH] Service port deletion result: ${undoSpResult.substring(0, 300)}`);
-      
-      // Small delay after service-port deletion
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 800));
 
-      // Step 3: Enter GPON interface
-      console.log(`[SSH] Step 3: Entering interface gpon ${frame}/${slot}...`);
-      const ifResult = await this.executeCommand("interface gpon " + String(frame) + "/" + String(slot));
-      console.log(`[SSH] Interface result: ${ifResult.substring(0, 100)}`);
+      // Step 3: Enter GPON interface (config -> interface gpon F/S)
+      const ifCmd = "interface gpon " + String(frame) + "/" + String(slot);
+      console.log(`[SSH] Step 3: Entering interface with: ${ifCmd}`);
+      const ifResult = await this.executeCommand(ifCmd);
+      console.log(`[SSH] Interface result: ${ifResult.substring(0, 200)}`);
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       // Step 4: Delete the ONU using "ont delete [PortID] [OnuID]" command
       const deleteCmd = "ont delete " + String(port) + " " + String(onuId);
       console.log(`[SSH] Step 4: Deleting ONU with: ${deleteCmd}`);
       const deleteResult = await this.executeCommand(deleteCmd);
-      console.log(`[SSH] Delete result: ${deleteResult}`);
+      console.log(`[SSH] Delete result: ${deleteResult.substring(0, 300)}`);
 
       // Check for errors
       if (deleteResult.includes("service virtual ports")) {
