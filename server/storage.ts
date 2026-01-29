@@ -101,27 +101,41 @@ export class DatabaseStorage implements IStorage {
       clearInterval(this.autoSyncInterval);
     }
     
-    // Auto-sync unbound ONUs every 5 minutes (300000 ms)
-    const UNBOUND_SYNC_INTERVAL = 5 * 60 * 1000;
-    console.log("[Storage] Auto-sync enabled: checking unbound ONUs every 5 minutes");
+    // Auto-sync every 5 minutes (300000 ms) - includes both unbound AND bound ONUs
+    const SYNC_INTERVAL = 5 * 60 * 1000;
+    console.log("[Storage] Auto-sync enabled: checking unbound AND bound ONUs every 5 minutes");
     
     this.autoSyncInterval = setInterval(async () => {
-      try {
-        if (huaweiSSH.isConnected()) {
-          console.log("[Storage] Auto-sync: Checking for new unbound ONUs...");
-          const result = await this.refreshUnboundOnus();
-          if (result.success) {
-            console.log("[Storage] Auto-sync: Unbound ONUs updated");
-          } else {
-            console.log(`[Storage] Auto-sync: Failed - ${result.message}`);
-          }
+      await this.runAutoSync();
+    }, SYNC_INTERVAL);
+  }
+  
+  private async runAutoSync(): Promise<void> {
+    try {
+      if (huaweiSSH.isConnected()) {
+        console.log("[Storage] Auto-sync: Updating unbound and bound ONUs...");
+        
+        // Update unbound ONUs
+        const unboundResult = await this.refreshUnboundOnus();
+        if (unboundResult.success) {
+          console.log("[Storage] Auto-sync: Unbound ONUs updated");
         } else {
-          console.log("[Storage] Auto-sync: Skipped - OLT not connected");
+          console.log(`[Storage] Auto-sync: Unbound failed - ${unboundResult.message}`);
         }
-      } catch (error: any) {
-        console.error("[Storage] Auto-sync error:", error.message);
+        
+        // Update bound ONUs (status, optical info, etc.)
+        const boundResult = await this.refreshBoundOnus();
+        if (boundResult.success) {
+          console.log("[Storage] Auto-sync: Bound ONUs updated");
+        } else {
+          console.log(`[Storage] Auto-sync: Bound failed - ${boundResult.message}`);
+        }
+      } else {
+        console.log("[Storage] Auto-sync: Skipped - OLT not connected");
       }
-    }, UNBOUND_SYNC_INTERVAL);
+    } catch (error: any) {
+      console.error("[Storage] Auto-sync error:", error.message);
+    }
   }
 
   private async autoReconnectOlt(): Promise<void> {
@@ -150,10 +164,10 @@ export class DatabaseStorage implements IStorage {
         // Cache OLT static info (serial, model, version, GPON ports)
         await this.cacheOltStaticInfo(credential.id);
         
-        // Only refresh unbound ONUs on auto-reconnect (not all data)
-        console.log("[Storage] Checking for unbound ONUs...");
-        this.refreshUnboundOnus().catch(err => {
-          console.error("[Storage] Auto-refresh unbound failed:", err.message);
+        // Run full sync immediately after connecting (unbound + bound ONUs)
+        console.log("[Storage] Running immediate sync after startup...");
+        this.runAutoSync().catch(err => {
+          console.error("[Storage] Startup sync failed:", err.message);
         });
       } else {
         console.log(`[Storage] Auto-reconnect failed: ${result.message}`);
@@ -197,6 +211,8 @@ export class DatabaseStorage implements IStorage {
       gemportId: dbOnu.gemportId ?? undefined,
       pppoeUsername: dbOnu.pppoeUsername ?? undefined,
       pppoePassword: dbOnu.pppoePassword ?? undefined,
+      wifiSsid: dbOnu.wifiSsid ?? undefined,
+      wifiPassword: dbOnu.wifiPassword ?? undefined,
     };
   }
 
@@ -752,6 +768,8 @@ export class DatabaseStorage implements IStorage {
               gemportId: onu.gemportId ?? null,
               pppoeUsername: onu.pppoeUsername || existing?.pppoeUsername || null,
               pppoePassword: existing?.pppoePassword || null, // Password can only come from DB, not OLT
+              wifiSsid: onu.wifiSsid || existing?.wifiSsid || null,
+              wifiPassword: onu.wifiPassword || existing?.wifiPassword || null,
               oltCredentialId: credential.id,
               boundAt: existing?.boundAt || new Date(onu.boundAt),
             };

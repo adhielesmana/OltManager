@@ -406,6 +406,22 @@ export default function BoundOnuPage() {
                 </div>
               )}
 
+              {(selectedOnu.wifiSsid || selectedOnu.wifiPassword) && (
+                <div className="border-t pt-4">
+                  <p className="text-sm font-medium mb-3">WiFi Configuration</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">SSID (Network Name)</p>
+                      <p className="font-mono text-sm">{selectedOnu.wifiSsid || "N/A"}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Password</p>
+                      <p className="font-mono text-sm">{selectedOnu.wifiPassword || "N/A"}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {((selectedOnu.rxPower !== undefined && selectedOnu.rxPower !== null) || (selectedOnu.txPower !== undefined && selectedOnu.txPower !== null)) && (
                 <div className="border-t pt-4">
                   <p className="text-sm font-medium mb-3">Optical Info</p>
