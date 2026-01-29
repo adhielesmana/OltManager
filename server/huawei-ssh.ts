@@ -447,6 +447,23 @@ export class HuaweiSSH {
     return this.connectionStatus === "connecting";
   }
 
+  // Get timeout based on command type - heavy commands need longer timeouts
+  private getCommandTimeout(command: string): number {
+    const lowerCmd = command.toLowerCase();
+    // Heavy commands that may take longer
+    if (lowerCmd.includes("display ont info") || 
+        lowerCmd.includes("display ont optical") ||
+        lowerCmd.includes("display ont autofind") ||
+        lowerCmd.includes("display vlan all") ||
+        lowerCmd.includes("display board")) {
+      return 30000; // 30 seconds for heavy commands
+    }
+    if (lowerCmd === "quit" || lowerCmd === "n" || lowerCmd === "y") {
+      return 5000; // 5 seconds for quit/confirmations
+    }
+    return 15000; // 15 seconds default
+  }
+
   async executeCommand(command: string): Promise<string> {
     return new Promise((resolve, reject) => {
       if (!this.shell || !this.connected) {
@@ -454,7 +471,7 @@ export class HuaweiSSH {
         return;
       }
 
-      // Add to queue
+      // Add to queue with command-specific timeout
       this.commandQueue.push({ command, resolve, reject });
       this.processQueue();
     });
@@ -481,19 +498,20 @@ export class HuaweiSSH {
     this.currentResolve = resolve;
     this.shellBuffer = "";
 
-    // Set timeout for command
+    // Set timeout for command (varies by command type)
     if (this.commandTimeout) {
       clearTimeout(this.commandTimeout);
     }
+    const timeout = this.getCommandTimeout(command);
     this.commandTimeout = setTimeout(() => {
       if (this.currentResolve) {
-        console.log(`[SSH] Command timeout: ${command}`);
+        console.log(`[SSH] Command timeout (${timeout}ms): ${command}`);
         this.currentResolve(this.shellBuffer);
         this.currentResolve = null;
         this.isExecuting = false;
         this.processQueue();
       }
-    }, 15000);
+    }, timeout);
 
     // Send command (screen-length is set once at session start)
     console.log(`[SSH] Executing: ${command}`);
