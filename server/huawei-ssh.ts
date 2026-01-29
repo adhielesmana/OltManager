@@ -2051,10 +2051,11 @@ export class HuaweiSSH {
       // 4. ont delete PortID OnuID - delete ONU
       // 5. quit and verify
 
-      // Step 1: Ensure we're in config mode
+      // Step 1: Ensure we're in config mode (enable -> config)
       console.log(`[SSH] Step 1: Entering config mode...`);
       await this.executeCommand("quit");
       await this.executeCommand("quit"); // Double quit to ensure we're at base
+      await this.executeCommand("enable");
       await this.executeCommand("config");
       
       // Step 2: Delete all service ports for this ONU using single command
