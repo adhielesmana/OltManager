@@ -202,6 +202,11 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
           <DialogTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5 text-primary" />
             Bind ONU
+            {selectedOnu?.equipmentId && selectedOnu.equipmentId !== "Unknown" && (
+              <span className="text-sm font-normal text-muted-foreground">
+                ({selectedOnu.equipmentId})
+              </span>
+            )}
           </DialogTitle>
           <DialogDescription>
             Configure a new ONU with safety validation. All fields are required.

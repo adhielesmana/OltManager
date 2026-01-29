@@ -71,7 +71,8 @@ export default function UnboundOnuPage() {
   const filteredOnus = unboundOnus.filter(
     (onu) =>
       onu.serialNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      onu.gponPort.toLowerCase().includes(searchQuery.toLowerCase())
+      onu.gponPort.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (onu.equipmentId && onu.equipmentId.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const handleBindClick = (onu?: UnboundOnu) => {
@@ -185,6 +186,11 @@ export default function UnboundOnuPage() {
                           <code className="font-mono text-sm bg-muted px-1.5 py-0.5 rounded">
                             {onu.serialNumber}
                           </code>
+                          {onu.equipmentId && onu.equipmentId !== "Unknown" && (
+                            <Badge variant="secondary" className="text-xs font-medium">
+                              {onu.equipmentId}
+                            </Badge>
+                          )}
                           <Badge variant="outline" className="bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20 text-xs">
                             New
                           </Badge>
