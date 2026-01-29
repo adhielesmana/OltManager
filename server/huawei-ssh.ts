@@ -1154,35 +1154,29 @@ export class HuaweiSSH {
           
           console.log(`[SSH] Found ${slotOnus.length} total bound ONUs on slot ${slot}`);
           
-          // Get optical info for all bound ONUs on this slot
+          // Get optical info for all bound ONUs - use per-port queries to avoid onuId collisions
+          // (same onuId can exist on different ports, e.g., ONU 0 on 0/1/0 and ONU 0 on 0/1/15)
           if (slotOnus.length > 0) {
-            // Try to get optical info for entire interface first (more efficient)
-            let opticalSuccess = false;
-            try {
-              const opticalOutput = await this.executeCommandWithDelay("display ont optical-info all", 800);
-              // Check if command was successful (no error message)
-              if (!opticalOutput.includes("Unknown command") && !opticalOutput.includes("Error:")) {
-                this.enrichWithOpticalInfo(slotOnus, opticalOutput);
-                opticalSuccess = true;
-              }
-            } catch (err) {
-              console.log(`[SSH] Optical info all-ports failed: ${err}`);
+            console.log(`[SSH] Getting optical info per-port for slot ${slot}`);
+            // Find which ports have ONUs
+            const portSet = new Set<number>();
+            for (const o of slotOnus) {
+              const parts = o.gponPort.split("/");
+              portSet.add(parseInt(parts[2]) || 0);
             }
+            const portsWithOnus = Array.from(portSet);
             
-            // Fallback: try per-port queries if all-ports failed
-            if (!opticalSuccess) {
-              console.log(`[SSH] Trying per-port optical info queries for slot ${slot}`);
-              for (let port = 0; port < portsPerSlot; port++) {
-                const portOnus = slotOnus.filter(o => o.gponPort === `0/${slot}/${port}`);
-                if (portOnus.length > 0) {
-                  try {
-                    const opticalOutput = await this.executeCommandWithDelay(`display ont optical-info ${port} all`, 500);
-                    if (!opticalOutput.includes("Unknown command")) {
-                      this.enrichWithOpticalInfo(portOnus, opticalOutput);
-                    }
-                  } catch (err) {
-                    // Continue if optical info fails
+            for (const port of portsWithOnus) {
+              const portOnus = slotOnus.filter(o => o.gponPort === `0/${slot}/${port}`);
+              if (portOnus.length > 0) {
+                try {
+                  const opticalOutput = await this.executeCommandWithDelay(`display ont optical-info ${port} all`, 500);
+                  if (!opticalOutput.includes("Unknown command") && !opticalOutput.includes("Error:")) {
+                    this.enrichWithOpticalInfo(portOnus, opticalOutput);
+                    console.log(`[SSH] Got optical info for ${portOnus.length} ONUs on port ${port}`);
                   }
+                } catch (err) {
+                  console.log(`[SSH] Optical info failed for port ${port}: ${err}`);
                 }
               }
             }
