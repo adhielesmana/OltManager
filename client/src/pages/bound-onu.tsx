@@ -272,7 +272,7 @@ export default function BoundOnuPage() {
                           <OnuStatusBadge status={onu.status} />
                         </TableCell>
                         <TableCell>
-                          {onu.rxPower !== undefined ? (
+                          {onu.rxPower !== undefined && onu.rxPower !== null ? (
                             <div className="flex items-center gap-1.5">
                               <Signal className={`h-3.5 w-3.5 ${signal.color}`} />
                               <span className={`font-mono text-sm ${signal.color}`}>
@@ -391,11 +391,11 @@ export default function BoundOnuPage() {
                 </div>
               )}
 
-              {(selectedOnu.rxPower !== undefined || selectedOnu.txPower !== undefined) && (
+              {((selectedOnu.rxPower !== undefined && selectedOnu.rxPower !== null) || (selectedOnu.txPower !== undefined && selectedOnu.txPower !== null)) && (
                 <div className="border-t pt-4">
                   <p className="text-sm font-medium mb-3">Optical Info</p>
                   <div className="grid grid-cols-3 gap-4">
-                    {selectedOnu.rxPower !== undefined && (
+                    {selectedOnu.rxPower !== undefined && selectedOnu.rxPower !== null && (
                       <div className="p-3 rounded-md bg-muted/50 text-center">
                         <p className="text-xs text-muted-foreground mb-1">RX Power</p>
                         <p className={`font-mono font-medium ${getSignalStrength(selectedOnu.rxPower).color}`}>
@@ -403,7 +403,7 @@ export default function BoundOnuPage() {
                         </p>
                       </div>
                     )}
-                    {selectedOnu.txPower !== undefined && (
+                    {selectedOnu.txPower !== undefined && selectedOnu.txPower !== null && (
                       <div className="p-3 rounded-md bg-muted/50 text-center">
                         <p className="text-xs text-muted-foreground mb-1">TX Power</p>
                         <p className="font-mono font-medium">
