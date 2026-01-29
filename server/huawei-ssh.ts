@@ -291,6 +291,17 @@ export class HuaweiSSH {
     });
   }
 
+  // Helper to add delay between heavy commands to ensure shell buffer is ready
+  private async delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // Execute command with pre-delay to ensure shell buffer is clear
+  async executeCommandWithDelay(command: string, delayMs: number = 500): Promise<string> {
+    await this.delay(delayMs);
+    return this.executeCommand(command);
+  }
+
   private processQueue(): void {
     if (this.isExecuting || this.commandQueue.length === 0 || !this.shell) {
       return;
@@ -428,7 +439,8 @@ export class HuaweiSSH {
       // Get optical info for bound ONUs if any (stay in interface mode)
       if (bound.length > 0) {
         try {
-          const opticalOutput = await this.executeCommand("display ont optical-info 0 all");
+          // Add delay to ensure shell buffer is clear after heavy display ont info command
+          const opticalOutput = await this.executeCommandWithDelay("display ont optical-info 0 all", 800);
           this.enrichWithOpticalInfo(bound, opticalOutput);
         } catch (err) {
           console.log("[SSH] Could not get optical info:", err);
@@ -574,7 +586,8 @@ export class HuaweiSSH {
       // Get optical info for status if we have bound ONUs
       if (onus.length > 0) {
         try {
-          const opticalOutput = await this.executeCommand("display ont optical-info 0 all");
+          // Add delay to ensure shell buffer is clear after heavy display ont info command
+          const opticalOutput = await this.executeCommandWithDelay("display ont optical-info 0 all", 800);
           this.enrichWithOpticalInfo(onus, opticalOutput);
         } catch (err) {
           console.log("[SSH] Could not get optical info");
