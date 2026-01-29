@@ -755,28 +755,39 @@ export class HuaweiSSH {
     }
   }
   
-  private parseWifiConfig(onu: BoundOnu, output: string): void {
-    // Parse WiFi SSID and password from "display ont wlan-config" output
+  private parseWifiInfo(onu: BoundOnu, output: string): void {
+    // Parse WiFi SSID and password from "display ont wlan-info F/S/P ONT_ID" output
+    // Command: display ont wlan-info F/S/P O (Frame/Slot/Port OnuID)
     // Always update with latest values from OLT (customer may have changed settings)
     let foundSsid: string | null = null;
     let foundPassword: string | null = null;
+    let foundSsid5G: string | null = null;
+    
+    console.log(`[SSH] Parsing wlan-info for ONU ${onu.onuId}:`);
+    console.log(`[SSH] Raw wlan-info output: ${output.substring(0, 500)}`);
     
     for (const line of output.split("\n")) {
       const trimmedLine = line.trim();
       
-      // Match SSID: various formats
-      // SSID: MyNetwork or ssid MyNetwork or SSID name: MyNetwork
-      const ssidMatch = trimmedLine.match(/(?:SSID|ssid)\s*(?:name)?\s*[:\s]\s*(.+)/i);
-      if (ssidMatch && !foundSsid) {
+      // Match SSID: various formats from display ont wlan-info
+      // SSID: MyNetwork or SSID name: MyNetwork or ssid-name MyNetwork
+      // Also handle indexed formats: SSID 0: name, SSID 1: name
+      const ssidMatch = trimmedLine.match(/(?:SSID|ssid)[\s\-]*(?:name|0|1)?\s*[:\s]\s*(.+)/i);
+      if (ssidMatch) {
         const ssid = ssidMatch[1].trim();
-        if (ssid && ssid !== "-" && ssid.length > 0) {
-          foundSsid = ssid;
+        if (ssid && ssid !== "-" && ssid.length > 0 && !ssid.includes("--")) {
+          // Check if this is 5GHz (usually index 1 or contains "5G")
+          if (trimmedLine.includes("1") || ssid.includes("5G")) {
+            if (!foundSsid5G) foundSsid5G = ssid;
+          } else if (!foundSsid) {
+            foundSsid = ssid;
+          }
         }
       }
       
       // Match password/key: various formats  
-      // WPA key: xxx or password: xxx or WPA-PSK key: xxx
-      const passMatch = trimmedLine.match(/(?:WPA.*key|password|WPA-PSK|psk|key)\s*[:\s]\s*(\S+)/i);
+      // WPA key: xxx or password: xxx or WPA-PSK key: xxx or psk-password xxx
+      const passMatch = trimmedLine.match(/(?:WPA.*key|password|WPA-PSK|psk|key|psk-password)\s*[:\s]\s*(\S+)/i);
       if (passMatch && !foundPassword) {
         const pass = passMatch[1].trim();
         if (pass && pass !== "-" && pass.length > 0) {
@@ -786,9 +797,14 @@ export class HuaweiSSH {
     }
     
     // Always update with latest values from OLT (overwrite existing)
-    if (foundSsid) {
-      onu.wifiSsid = foundSsid;
-      console.log(`[SSH] WiFi SSID for ONU ${onu.onuId}: "${foundSsid}"`);
+    if (foundSsid || foundSsid5G) {
+      // Combine 2.4GHz and 5GHz SSIDs if both found
+      if (foundSsid && foundSsid5G) {
+        onu.wifiSsid = `${foundSsid} / ${foundSsid5G}`;
+      } else {
+        onu.wifiSsid = foundSsid || foundSsid5G || undefined;
+      }
+      console.log(`[SSH] WiFi SSID for ONU ${onu.onuId}: "${onu.wifiSsid}"`);
     }
     if (foundPassword) {
       onu.wifiPassword = foundPassword;
@@ -1151,12 +1167,12 @@ export class HuaweiSSH {
                   console.log(`[SSH] PPPoE config failed for ONU ${onu.onuId}: ${pppoeErr}`);
                 }
                 
-                // Get WiFi config
+                // Get WiFi info using "display ont wlan-info F/S/P ONT_ID"
                 try {
-                  const wifiOutput = await this.executeCommand(`display ont wlan-config ${portNum} ${onu.onuId}`);
-                  this.parseWifiConfig(onu, wifiOutput);
+                  const wifiOutput = await this.executeCommand(`display ont wlan-info ${portNum} ${onu.onuId}`);
+                  this.parseWifiInfo(onu, wifiOutput);
                 } catch (wifiErr) {
-                  console.log(`[SSH] WiFi config failed for ONU ${onu.onuId}: ${wifiErr}`);
+                  console.log(`[SSH] WiFi info failed for ONU ${onu.onuId}: ${wifiErr}`);
                 }
               } catch (err) {
                 console.log(`[SSH] Could not get description for ONU ${onu.onuId}: ${err}`);
