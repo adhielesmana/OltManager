@@ -1351,6 +1351,17 @@ export class DatabaseStorage implements IStorage {
           if (bindResult.success) {
             console.log(`[Storage] SSH bind successful for ONU ${sn}`);
             
+            // Save WiFi credentials returned from bind
+            if (bindResult.wifiSsid || bindResult.wifiPassword) {
+              await db.update(boundOnus)
+                .set({
+                  wifiSsid: bindResult.wifiSsid ?? null,
+                  wifiPassword: bindResult.wifiPassword ?? null,
+                })
+                .where(eq(boundOnus.id, boundOnuId));
+              console.log(`[Storage] Saved WiFi credentials for ONU ${sn}: SSID=${bindResult.wifiSsid}`);
+            }
+            
             // Only remove from unbound list AFTER successful bind
             await db.delete(unboundOnus)
               .where(and(eq(unboundOnus.oltCredentialId, credentialId), eq(unboundOnus.serialNumber, sn)));

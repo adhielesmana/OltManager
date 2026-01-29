@@ -17,6 +17,13 @@ A professional network operations management application for Huawei MA5801 OLT d
 - **Orphan ONU Removal**: Visible trash button for offline/LOS ONUs for easy individual removal
 - **Professional Landing Page**: Hubstaff-style hero with dashboard mockups and trust badges
 - **Automatic WiFi for Huawei ONUs**: WiFi config pushed via OMCI during binding with auto-reset
+  - **Default SSID**: `ONU_<last 8 chars of serial>` (e.g., `ONU_12345678`)
+  - **Default Password**: `wifi<last 8 chars of serial>` (e.g., `wifi12345678`)
+  - Custom SSID/password can be specified during binding
+  - Credentials saved to database and displayed in ONU details
+- **Remote ONU Access**: HTTP/HTTPS access enabled from WAN side during binding
+  - ONU web interface accessible remotely after successful bind
+  - Uses `ont remote-admin` or `ont wan-admin` commands
 - **VLANs reusable**: Multiple ONUs can share the same VLAN
 - **SSH command delay fix**: Added 800ms delay between heavy commands to prevent buffer issues
 - **Auto-detect GPON ports**: Automatically detects port count from OLT board info (8 or 16 ports)

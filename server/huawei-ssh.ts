@@ -1635,7 +1635,10 @@ export class HuaweiSSH {
     pppoeUsername?: string;
     pppoePassword?: string;
     onuType?: "huawei" | "general";
-  }): Promise<{ success: boolean; message: string }> {
+    wifiSsid?: string;
+    wifiPassword?: string;
+    enableRemoteAccess?: boolean;
+  }): Promise<{ success: boolean; message: string; wifiSsid?: string; wifiPassword?: string }> {
     if (!this.isConnected()) {
       return { success: false, message: "Not connected to OLT" };
     }
@@ -1648,7 +1651,15 @@ export class HuaweiSSH {
     this.operationLock = new Promise<void>(resolve => { releaseLock = resolve; });
 
     try {
-      const { serialNumber, gponPort, onuId, lineProfileName, serviceProfileName, description, vlanId, gemportId, pppoeUsername, pppoePassword, onuType = "huawei" } = params;
+      const { 
+        serialNumber, gponPort, onuId, lineProfileName, serviceProfileName, 
+        description, vlanId, gemportId, pppoeUsername, pppoePassword, 
+        onuType = "huawei", wifiSsid, wifiPassword, enableRemoteAccess = true 
+      } = params;
+      
+      // Default WiFi credentials based on serial number (last 8 chars for uniqueness)
+      const defaultSsid = wifiSsid || `ONU_${serialNumber.slice(-8)}`;
+      const defaultPassword = wifiPassword || `wifi${serialNumber.slice(-8)}`;
       
       // Parse port - format is "0/1/0" -> frame=0, slot=1, port=0
       const portParts = gponPort.split("/");
@@ -1765,10 +1776,63 @@ export class HuaweiSSH {
         console.log(`[SSH] Service-port created successfully`);
       }
 
-      // Step 10: For Huawei ONUs, reset to force apply OMCI config (including WiFi)
-      // WiFi config is pushed automatically via OMCI when using service profile with WLAN enabled
+      // Step 10: Configure WiFi SSID and Password for Huawei ONUs via OMCI
       if (!isGeneral) {
-        console.log(`[SSH] Step 10: Resetting ONU to force apply OMCI config (WiFi)...`);
+        console.log(`[SSH] Step 10: Configuring WiFi SSID="${defaultSsid}" Password="${defaultPassword}"...`);
+        try {
+          // Enter GPON interface first
+          await this.executeCommand("interface gpon " + String(frame) + "/" + String(slot));
+          await this.delay(500);
+          
+          // Configure WiFi via ont wlan-cfg command
+          // Format: ont wlan-cfg PORT ONU_ID ssid-index 0 ssid-name SSID authentication-mode wpa2-psk psk-password PASSWORD
+          const wifiCmd = "ont wlan-cfg " + slotPort + 
+            " ssid-index 0 ssid-name " + defaultSsid + 
+            " authentication-mode wpa2-psk psk-password " + defaultPassword;
+          console.log(`[SSH] WiFi config command: ont wlan-cfg ${slotPort} ssid-index 0 ssid-name ${defaultSsid} authentication-mode wpa2-psk psk-password ****`);
+          const wifiResult = await this.executeCommand(wifiCmd);
+          console.log(`[SSH] WiFi config result: ${wifiResult.substring(0, 200)}`);
+          
+          // Exit interface for next step
+          await this.executeCommand("quit");
+        } catch (wifiErr) {
+          console.log(`[SSH] Warning: WiFi config failed (non-critical, ONU may not support WLAN): ${wifiErr}`);
+        }
+      }
+
+      // Step 11: Enable remote ONU management from WAN side (HTTP/HTTPS access)
+      if (enableRemoteAccess && !isGeneral) {
+        console.log(`[SSH] Step 11: Enabling remote ONU access from WAN side...`);
+        try {
+          // Enter GPON interface
+          await this.executeCommand("interface gpon " + String(frame) + "/" + String(slot));
+          await this.delay(500);
+          
+          // Enable remote management via WAN
+          // ont remote-admin PORT ONU_ID http-enable https-enable
+          const remoteCmd = "ont remote-admin " + slotPort + " http-enable https-enable";
+          console.log(`[SSH] Remote access command: ${remoteCmd}`);
+          const remoteResult = await this.executeCommand(remoteCmd);
+          console.log(`[SSH] Remote access result: ${remoteResult.substring(0, 200)}`);
+          
+          // Alternative command if the above doesn't work: ont wan-admin
+          if (remoteResult.includes("Unknown") || remoteResult.includes("Invalid")) {
+            const altRemoteCmd = "ont wan-admin " + slotPort + " enable";
+            console.log(`[SSH] Trying alternative: ${altRemoteCmd}`);
+            const altResult = await this.executeCommand(altRemoteCmd);
+            console.log(`[SSH] Alt remote access result: ${altResult.substring(0, 200)}`);
+          }
+          
+          // Exit interface
+          await this.executeCommand("quit");
+        } catch (remoteErr) {
+          console.log(`[SSH] Warning: Remote access config failed (non-critical): ${remoteErr}`);
+        }
+      }
+
+      // Step 12: For Huawei ONUs, reset to force apply OMCI config (including WiFi)
+      if (!isGeneral) {
+        console.log(`[SSH] Step 12: Resetting ONU to force apply OMCI config...`);
         try {
           // Need to enter GPON interface first
           await this.executeCommand("interface gpon " + String(frame) + "/" + String(slot));
@@ -1789,7 +1853,13 @@ export class HuaweiSSH {
       }
 
       console.log(`[SSH] Successfully bound ONU ${serialNumber} as ID ${onuId} on ${gponPort}`);
-      return { success: true, message: `ONU bound successfully as ID ${onuId}${!isGeneral ? " - WiFi will be ready in ~60 seconds" : ""}` };
+      const wifiInfo = !isGeneral ? ` | WiFi SSID: ${defaultSsid} | Password: ${defaultPassword}` : "";
+      return { 
+        success: true, 
+        message: `ONU bound successfully as ID ${onuId}${!isGeneral ? " - WiFi will be ready in ~60 seconds" : ""}${wifiInfo}`,
+        wifiSsid: !isGeneral ? defaultSsid : undefined,
+        wifiPassword: !isGeneral ? defaultPassword : undefined
+      };
 
     } catch (error) {
       console.error("[SSH] Error binding ONU:", error);
