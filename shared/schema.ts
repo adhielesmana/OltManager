@@ -70,10 +70,12 @@ export const oltCredentials = pgTable("olt_credentials", {
   lastConnected: timestamp("last_connected"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   createdBy: integer("created_by"),
-  // Cached OLT static info - only updated when OLT changes
+  // Cached OLT static info - only updated when OLT changes or daily at midnight
   oltSerialNumber: text("olt_serial_number"),
   oltModel: text("olt_model"),
   oltVersion: text("olt_version"),
+  oltHostname: text("olt_hostname"),
+  oltPatch: text("olt_patch"),
   cachedGponPorts: text("cached_gpon_ports"), // JSON array of port strings
 });
 

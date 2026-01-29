@@ -144,18 +144,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   private async runMidnightRefresh(): Promise<void> {
-    console.log("[Storage] Midnight refresh: Updating GPON ports and OLT static info...");
+    console.log("[Storage] Midnight refresh: Updating OLT static info and GPON ports...");
     try {
       if (huaweiSSH.isConnected()) {
-        const credential = await this.getActiveOltCredential();
-        if (credential) {
-          // Force refresh of GPON ports
-          const gponPorts = await huaweiSSH.getGponPorts();
-          await db.update(oltCredentials)
-            .set({ cachedGponPorts: JSON.stringify(gponPorts) })
-            .where(eq(oltCredentials.id, credential.id));
-          console.log(`[Storage] Midnight refresh: Updated ${gponPorts.length} GPON ports`);
-        }
+        // Refresh all OLT static info (model, version, hostname, patch, GPON ports)
+        await this.refreshOltStaticInfo();
+        console.log("[Storage] Midnight refresh: Completed");
       } else {
         console.log("[Storage] Midnight refresh: Skipped - OLT not connected");
       }
@@ -499,7 +493,8 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  // Cache OLT static info (serial, model, version, GPON ports) - only updates if changed
+  // Cache OLT static info (serial, model, version, hostname, patch, GPON ports)
+  // Called on OLT registration and daily at midnight
   private async cacheOltStaticInfo(credentialId: number): Promise<void> {
     try {
       console.log("[Storage] Caching OLT static info...");
@@ -526,13 +521,44 @@ export class DatabaseStorage implements IStorage {
           oltSerialNumber: newSerial,
           oltModel: oltInfo.model || oltInfo.product,
           oltVersion: oltInfo.version,
+          oltHostname: oltInfo.hostname,
+          oltPatch: oltInfo.patch,
           cachedGponPorts: JSON.stringify(gponPorts),
         })
         .where(eq(oltCredentials.id, credentialId));
       
-      console.log(`[Storage] Cached OLT info: model=${oltInfo.model}, serial=${newSerial}, ports=${gponPorts.length}`);
+      console.log(`[Storage] Cached OLT info: model=${oltInfo.model}, hostname=${oltInfo.hostname}, serial=${newSerial}, ports=${gponPorts.length}`);
     } catch (error: any) {
       console.error("[Storage] Failed to cache OLT static info:", error.message);
+    }
+  }
+
+  // Force refresh OLT static info (called at midnight)
+  async refreshOltStaticInfo(): Promise<void> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential) return;
+    
+    if (!huaweiSSH.isConnected()) return;
+    
+    try {
+      console.log("[Storage] Refreshing OLT static info...");
+      const oltInfo = await huaweiSSH.getOltInfo();
+      const gponPorts = await huaweiSSH.getGponPorts();
+      
+      await db.update(oltCredentials)
+        .set({
+          oltSerialNumber: oltInfo.serialNumber || "",
+          oltModel: oltInfo.model || oltInfo.product,
+          oltVersion: oltInfo.version,
+          oltHostname: oltInfo.hostname,
+          oltPatch: oltInfo.patch,
+          cachedGponPorts: JSON.stringify(gponPorts),
+        })
+        .where(eq(oltCredentials.id, credential.id));
+      
+      console.log(`[Storage] Refreshed OLT info: model=${oltInfo.model}, hostname=${oltInfo.hostname}, ports=${gponPorts.length}`);
+    } catch (error: any) {
+      console.error("[Storage] Failed to refresh OLT static info:", error.message);
     }
   }
 
@@ -1032,7 +1058,8 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  // OLT data operations - now read from database
+  // OLT data operations - read from database cache (no SSH calls)
+  // OLT info is cached on registration and refreshed daily at midnight
   async getOltInfo(): Promise<OltInfo & { connectionStatus?: string }> {
     const credential = await this.getActiveOltCredential();
     if (!credential) {
@@ -1049,26 +1076,32 @@ export class DatabaseStorage implements IStorage {
     // Get connection status
     const connStatus = huaweiSSH.getConnectionStatus();
     
-    // If connecting, return initializing status
+    // If connecting, return cached info with connecting status
     if (connStatus === "connecting") {
       return {
-        product: credential.name,
-        version: "-",
-        patch: "-",
+        product: credential.oltModel || credential.name,
+        version: credential.oltVersion || "-",
+        patch: credential.oltPatch || "-",
         uptime: "-",
+        hostname: credential.oltHostname || undefined,
+        model: credential.oltModel || undefined,
         connected: false,
         connectionStatus: "connecting",
       };
     }
 
-    // If SSH is connected, get real OLT info
+    // If SSH is connected, return cached info with connected status
     if (huaweiSSH.isConnected()) {
-      try {
-        const info = await huaweiSSH.getOltInfo();
-        return { ...info, connectionStatus: "connected" };
-      } catch {
-        // Fall through to return disconnected state
-      }
+      return {
+        product: credential.oltModel || credential.name,
+        version: credential.oltVersion || "-",
+        patch: credential.oltPatch || "-",
+        uptime: "-", // Uptime not cached, would require SSH
+        hostname: credential.oltHostname || undefined,
+        model: credential.oltModel || undefined,
+        connected: true,
+        connectionStatus: "connected",
+      };
     }
     
     // If disconnected but have credential, try auto-reconnect in background
@@ -1076,21 +1109,25 @@ export class DatabaseStorage implements IStorage {
       // Start auto-reconnect (non-blocking)
       this.ensureConnected().catch(() => {});
       return {
-        product: credential.name,
-        version: "-",
-        patch: "-",
+        product: credential.oltModel || credential.name,
+        version: credential.oltVersion || "-",
+        patch: credential.oltPatch || "-",
         uptime: "-",
+        hostname: credential.oltHostname || undefined,
+        model: credential.oltModel || undefined,
         connected: false,
         connectionStatus: "connecting", // Show as connecting since we're attempting
       };
     }
 
-    // Failed state
+    // Failed state - still show cached info
     return {
-      product: credential.name,
-      version: "-",
-      patch: "-",
+      product: credential.oltModel || credential.name,
+      version: credential.oltVersion || "-",
+      patch: credential.oltPatch || "-",
       uptime: "-",
+      hostname: credential.oltHostname || undefined,
+      model: credential.oltModel || undefined,
       connected: false,
       connectionStatus: connStatus,
     };
