@@ -44,6 +44,7 @@ export default function BoundOnuPage() {
 
   const { data: boundOnus = [], isLoading, refetch, isFetching } = useQuery<BoundOnu[]>({
     queryKey: ["/api/onu/bound"],
+    refetchInterval: 5000, // Poll every 5 seconds for real-time updates from database
   });
 
   const { data: refreshStatus } = useQuery<{ lastRefreshed: string | null; inProgress: boolean; error: string | null }>({

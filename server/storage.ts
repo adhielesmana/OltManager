@@ -1198,6 +1198,9 @@ export class DatabaseStorage implements IStorage {
       throw new Error(result.message);
     }
     
+    // Store ONU info before deleting from bound list
+    const serialNumber = onu.serialNumber;
+    
     // Remove from bound list in database
     await db.delete(boundOnus)
       .where(and(
@@ -1206,8 +1209,20 @@ export class DatabaseStorage implements IStorage {
         eq(boundOnus.gponPort, gponPort)
       ));
     
-    // Note: The ONU should appear in autofind on the OLT automatically
-    // We'll pick it up on the next unbound refresh
+    // Immediately add ONU back to unbound list in database
+    // This ensures UI updates without needing a full OLT refresh
+    try {
+      await db.insert(unboundOnus).values({
+        serialNumber,
+        gponPort,
+        equipmentId: "Unknown",
+        discoveredAt: new Date(),
+        oltCredentialId: credential.id,
+      }).onConflictDoNothing();
+      console.log(`[Storage] Added unbound ONU ${serialNumber} to database after unbind`);
+    } catch (err) {
+      console.log(`[Storage] Could not add unbound ONU ${serialNumber} to database: ${err}`);
+    }
   }
 }
 
