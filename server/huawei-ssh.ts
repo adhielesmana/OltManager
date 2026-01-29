@@ -906,32 +906,55 @@ export class HuaweiSSH {
       const gponSlots = await this.detectGponSlots();
       console.log(`[SSH] Getting bound ONUs from slots: ${gponSlots.join(", ")}`);
       
+      // Get port count per slot (16 ports for most boards)
+      const portsPerSlot = 16;
+      
       // Scan each GPON slot
       for (const slot of gponSlots) {
         try {
           // Enter GPON interface for this slot
           await this.executeCommand(`interface gpon 0/${slot}`);
           
-          // Get bound ONUs for ALL ports on this slot using "display ont info all"
-          const output = await this.executeCommand("display ont info all");
-          const slotOnus = this.parseBoundOnus(output, `0/${slot}/0`);
-          console.log(`[SSH] Found ${slotOnus.length} bound ONUs on slot ${slot}`);
+          const slotOnus: BoundOnu[] = [];
+          
+          // Scan each port (0-15) on this slot - "display ont info all" doesn't work, need per-port
+          for (let port = 0; port < portsPerSlot; port++) {
+            try {
+              const output = await this.executeCommand(`display ont info ${port} all`);
+              // Check if there's actual data (not just error message)
+              if (!output.includes("Parameter error") && !output.includes("do not exist")) {
+                const portOnus = this.parseBoundOnus(output, `0/${slot}/${port}`);
+                if (portOnus.length > 0) {
+                  console.log(`[SSH] Found ${portOnus.length} bound ONUs on port 0/${slot}/${port}`);
+                  slotOnus.push(...portOnus);
+                }
+              }
+            } catch (err) {
+              // Port might not exist or have no ONUs - continue to next port
+            }
+          }
+          
+          console.log(`[SSH] Found ${slotOnus.length} total bound ONUs on slot ${slot}`);
           
           // Get optical info for all bound ONUs on this slot
           if (slotOnus.length > 0) {
-            try {
-              // Add delay to ensure shell buffer is clear after heavy display ont info command
-              const opticalOutput = await this.executeCommandWithDelay("display ont optical-info all", 800);
-              this.enrichWithOpticalInfo(slotOnus, opticalOutput);
-            } catch (err) {
-              console.log(`[SSH] Could not get optical info for slot ${slot}`);
+            // Get optical info per port
+            for (let port = 0; port < portsPerSlot; port++) {
+              const portOnus = slotOnus.filter(o => o.gponPort === `0/${slot}/${port}`);
+              if (portOnus.length > 0) {
+                try {
+                  const opticalOutput = await this.executeCommandWithDelay(`display ont optical-info ${port} all`, 500);
+                  this.enrichWithOpticalInfo(portOnus, opticalOutput);
+                } catch (err) {
+                  // Continue if optical info fails
+                }
+              }
             }
             
             // Get descriptions for each ONU (limit to first 50 to avoid timeout)
             const onusToEnrich = slotOnus.slice(0, 50);
             for (const onu of onusToEnrich) {
               try {
-                // Parse port to get the port number for this command
                 const portParts = onu.gponPort.split("/");
                 const portNum = parseInt(portParts[2]) || 0;
                 const detailOutput = await this.executeCommand(`display ont info ${portNum} ${onu.onuId}`);

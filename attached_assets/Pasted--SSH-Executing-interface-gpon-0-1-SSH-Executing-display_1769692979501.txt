@@ -1,0 +1,44 @@
+[SSH] Executing: interface gpon 0/1
+[SSH] Executing: display ont info all
+[Storage] Refreshing unbound ONUs from OLT...
+[SSH] Executing: display board 0
+[SSH] Parsing bound ONU output, lines: 5
+[SSH] Raw bound ONU output: display ont info all
+                                         ^
+  % Parameter error, the error locates at '^'
+
+ISP-PWS-LKTPJG-P-01-HWI#
+[SSH] Parsed 0 bound ONUs
+[SSH] Found 0 bound ONUs on slot 1
+[SSH] Handling parameter completion prompt with Enter
+[SSH] Executing: quit
+[SSH] Found GPON board on slot 1: V922GPHF
+[SSH] Getting unbound ONUs from slots: 1
+1:21:58 PM [express] GET /api/users 304 in 6ms :: [{"id":1,"username":"ikhsan","role":"admin","email":"support@kabeltelekom.id","createdAt":"2026-01-29T01:49:38.973Z"},{"id":3,"username":"jonathan@","role":"user","email":"jonathan@gmail.com","createdAt":"2026-01-29T01:57:36.686Z"},{"id":4,"username":"aldan","role":"user","email":"aldan@gmail.com","createdAt":"2026-01-29T02:00:22.140Z"}]
+[SSH] Command timeout (5000ms): quit
+[SSH] Executing: display version
+[SSH] Total bound ONUs found: 0
+[Storage] Refreshed 0 bound ONUs
+1:22:02 PM [express] POST /api/onu/bound/refresh 200 in 10265ms :: {"success":true,"message":"Found 0 bound ONUs"}
+[SSH] Executing: interface gpon 0/1
+1:22:03 PM [express] GET /api/olt/credentials 200 in 18ms :: [{"id":1,"name":"OLT Huawei Starlite Pajang","host":"103.172.24.62","port":2204,"username":"root","protocol":"ssh","isActive":true,"isConnected":true,"lastConnected":"2026-01-29T13:19:29.227Z"}]
+[SSH] Executing: display elabel 0
+[SSH] Executing: display ont autofind all
+1:22:05 PM [express] GET /api/olt/info 304 in 9686ms :: {"product":"MA5801","version":"Unknown","patch":"-","uptime":"Unknown","connected":true,"hostname":"ISP-PWS-LKTPJG-P-01-HWI","connectionStatus":"connected"}
+[SSH] Handling parameter completion prompt with Enter
+[SSH] Parsing autofind output, lines: 8
+[SSH] Raw autofind output: display ont autofind all 
+
+
+  Command:
+          display ont autofind all
+  Failure: The automatically found ONTs do not exist
+
+ISP-PWS-LKTPJG-P-01-HWI#
+[SSH] Parsed 0 unbound ONUs total
+[SSH] Found 0 unbound ONUs on slot 1
+[SSH] Executing: quit
+[SSH] Command timeout (5000ms): quit
+[Storage] Refreshed 0 unbound ONUs
+1:22:12 PM [express] POST /api/onu/unbound/refresh 200 in 17402ms :: {"success":true,"message":"Found 0 unbound ONUs"}
+1:22:12 PM [express] GET /api/onu/unbound/count 304 in 8ms :: {"count":0}
