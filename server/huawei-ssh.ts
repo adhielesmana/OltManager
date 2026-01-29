@@ -1086,17 +1086,19 @@ export class HuaweiSSH {
               try {
                 const portParts = onu.gponPort.split("/");
                 const portNum = parseInt(portParts[2]) || 0;
+                console.log(`[SSH] Enriching ONU ${onu.gponPort}/${onu.onuId} (port=${portNum})`);
                 const detailOutput = await this.executeCommand(`display ont info ${portNum} ${onu.onuId}`);
+                // Log first 300 chars of output for debugging
+                console.log(`[SSH] display ont info ${portNum} ${onu.onuId} output (first 300 chars): ${detailOutput.substring(0, 300).replace(/\n/g, '\\n')}`);
                 this.parseOnuDescription(onu, detailOutput);
                 console.log(`[SSH] After parseOnuDescription: ONU ${onu.onuId} description="${onu.description || '(still empty)'}"`);
-
                 
                 // Get PPPoE config
                 try {
                   const pppoeOutput = await this.executeCommand(`display ont ipconfig ${portNum} ${onu.onuId}`);
                   this.parsePppoeConfig(onu, pppoeOutput);
                 } catch (pppoeErr) {
-                  // PPPoE config is optional
+                  console.log(`[SSH] PPPoE config failed for ONU ${onu.onuId}: ${pppoeErr}`);
                 }
                 
                 // Get WiFi config
@@ -1104,10 +1106,10 @@ export class HuaweiSSH {
                   const wifiOutput = await this.executeCommand(`display ont wlan-config ${portNum} ${onu.onuId}`);
                   this.parseWifiConfig(onu, wifiOutput);
                 } catch (wifiErr) {
-                  // WiFi config is optional (not all ONUs have WiFi)
+                  console.log(`[SSH] WiFi config failed for ONU ${onu.onuId}: ${wifiErr}`);
                 }
               } catch (err) {
-                console.log(`[SSH] Could not get description for ONU ${onu.onuId}`);
+                console.log(`[SSH] Could not get description for ONU ${onu.onuId}: ${err}`);
               }
             }
           }
