@@ -2044,13 +2044,12 @@ export class HuaweiSSH {
       console.log(`[SSH] Unbinding ONU ${serialNumber} from port ${gponPort}, cleanConfig=${cleanConfig}`);
       console.log(`[SSH] Parsed port parts: frame=${frame}, slot=${slot}, port=${port}`);
 
-      // CORRECT HUAWEI UNBIND SEQUENCE (from official docs):
+      // HUAWEI UNBIND SEQUENCE:
       // 1. Enter config mode
-      // 2. display service-port port F/S/P ont ONU_ID - find service ports
-      // 3. undo service-port {id} - delete each service port (in config mode)
-      // 4. interface gpon F/S - enter interface
-      // 5. ont delete port ONU_ID - delete ONU
-      // 6. quit and verify
+      // 2. undo service-port port F/S/P ont OnuID - delete all service ports for this ONU
+      // 3. interface gpon F/S - enter interface
+      // 4. ont delete PortID OnuID - delete ONU
+      // 5. quit and verify
 
       // Step 1: Ensure we're in config mode
       console.log(`[SSH] Step 1: Entering config mode...`);
@@ -2058,70 +2057,24 @@ export class HuaweiSSH {
       await this.executeCommand("quit"); // Double quit to ensure we're at base
       await this.executeCommand("config");
       
-      // Step 2: Find service ports for this specific ONU
-      // Use: display service-port port F/S/P ont ONU_ID
-      const spCmd = "display service-port port " + String(frame) + "/" + String(slot) + "/" + String(port) + " ont " + String(onuId);
-      console.log(`[SSH] Step 2: Finding service ports with: ${spCmd}`);
-      const spOutput = await this.executeCommand(spCmd);
-      console.log(`[SSH] Service port output:`);
-      console.log(spOutput);
+      // Step 2: Delete all service ports for this ONU using single command
+      // Format: undo service-port port F/S/P ont OnuID
+      const undoSpCmd = "undo service-port port " + String(frame) + "/" + String(slot) + "/" + String(port) + " ont " + String(onuId);
+      console.log(`[SSH] Step 2: Deleting service ports with: ${undoSpCmd}`);
+      const undoSpResult = await this.executeCommand(undoSpCmd);
+      console.log(`[SSH] Service port deletion result: ${undoSpResult.substring(0, 300)}`);
       
-      // Parse service port IDs from output
-      // Format: INDEX  VLAN  VLAN ATTR  PORT TYPE  F/S/P  VPI  VCI ...
-      const servicePortIds: number[] = [];
-      const lines = spOutput.split('\n');
-      
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        // Skip header lines, dashes, empty lines, and info messages
-        if (!trimmedLine || 
-            trimmedLine.startsWith('-') || 
-            trimmedLine.startsWith('INDEX') || 
-            trimmedLine.includes('Command:') || 
-            trimmedLine.includes('display') ||
-            trimmedLine.includes('Total:') ||
-            trimmedLine.includes('No service virtual port') ||
-            trimmedLine.includes('Unknown command') ||
-            trimmedLine.includes('Error')) {
-          continue;
-        }
-        
-        const parts = trimmedLine.split(/\s+/);
-        // First column should be the service-port index
-        if (parts.length >= 1) {
-          const spIndex = parseInt(parts[0]);
-          if (!isNaN(spIndex) && spIndex >= 0) {
-            servicePortIds.push(spIndex);
-            console.log(`[SSH] Found service-port ID: ${spIndex}`);
-          }
-        }
-      }
-      
-      // Step 3: Delete each service port (must be done in config mode BEFORE deleting ONT)
-      if (servicePortIds.length > 0) {
-        console.log(`[SSH] Step 3: Deleting ${servicePortIds.length} service port(s)...`);
-        for (const spId of servicePortIds) {
-          const undoCmd = "undo service-port " + String(spId);
-          console.log(`[SSH] Executing: ${undoCmd}`);
-          const undoResult = await this.executeCommand(undoCmd);
-          console.log(`[SSH] Result: ${undoResult.substring(0, 200)}`);
-          
-          // Small delay between service-port deletions
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        console.log(`[SSH] Deleted ${servicePortIds.length} service port(s)`);
-      } else {
-        console.log(`[SSH] No service ports found for this ONU`);
-      }
+      // Small delay after service-port deletion
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Step 4: Enter GPON interface
-      console.log(`[SSH] Step 4: Entering interface gpon ${frame}/${slot}...`);
+      // Step 3: Enter GPON interface
+      console.log(`[SSH] Step 3: Entering interface gpon ${frame}/${slot}...`);
       const ifResult = await this.executeCommand("interface gpon " + String(frame) + "/" + String(slot));
       console.log(`[SSH] Interface result: ${ifResult.substring(0, 100)}`);
       
-      // Step 5: Delete the ONU using "ont delete [PortID] [OnuID]" command
+      // Step 4: Delete the ONU using "ont delete [PortID] [OnuID]" command
       const deleteCmd = "ont delete " + String(port) + " " + String(onuId);
-      console.log(`[SSH] Step 5: Deleting ONU with: ${deleteCmd}`);
+      console.log(`[SSH] Step 4: Deleting ONU with: ${deleteCmd}`);
       const deleteResult = await this.executeCommand(deleteCmd);
       console.log(`[SSH] Delete result: ${deleteResult}`);
 
@@ -2139,8 +2092,8 @@ export class HuaweiSSH {
       // Exit interface
       await this.executeCommand("quit");
       
-      // Step 6: Verify deletion
-      console.log(`[SSH] Step 6: Verifying deletion...`);
+      // Step 5: Verify deletion
+      console.log(`[SSH] Step 5: Verifying deletion...`);
       await this.executeCommand("interface gpon " + String(frame) + "/" + String(slot));
       const verifyCmd = "display ont info " + String(port) + " " + String(onuId);
       const verifyResult = await this.executeCommand(verifyCmd);
