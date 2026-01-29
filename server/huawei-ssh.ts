@@ -594,49 +594,106 @@ export class HuaweiSSH {
   
   private async doGetAllOnuData(): Promise<{ unbound: UnboundOnu[], bound: BoundOnu[] }> {
     try {
-      // Enter GPON interface once
-      await this.executeCommand("interface gpon 0/1");
+      const allUnbound: UnboundOnu[] = [];
+      const allBound: BoundOnu[] = [];
       
-      // Get autofind (unbound) first
-      const autofindOutput = await this.executeCommand("display ont autofind 0");
-      const unbound = this.parseUnboundOnus(autofindOutput, "0/1/0");
+      // Detect which slots have GPON boards
+      const gponSlots = await this.detectGponSlots();
+      console.log(`[SSH] Detected GPON slots: ${gponSlots.join(", ")}`);
       
-      // Get bound ONUs
-      const boundOutput = await this.executeCommand("display ont info 0 all");
-      const bound = this.parseBoundOnus(boundOutput, "0/1/0");
-      
-      // Get optical info for bound ONUs if any (stay in interface mode)
-      if (bound.length > 0) {
+      // Scan each GPON slot
+      for (const slot of gponSlots) {
         try {
-          // Add delay to ensure shell buffer is clear after heavy display ont info command
-          const opticalOutput = await this.executeCommandWithDelay("display ont optical-info 0 all", 800);
-          this.enrichWithOpticalInfo(bound, opticalOutput);
+          // Enter GPON interface for this slot
+          await this.executeCommand(`interface gpon 0/${slot}`);
+          
+          // Get autofind (unbound) for ALL ports on this slot
+          const autofindOutput = await this.executeCommand("display ont autofind all");
+          const unbound = this.parseUnboundOnus(autofindOutput, `0/${slot}/0`);
+          allUnbound.push(...unbound);
+          console.log(`[SSH] Found ${unbound.length} unbound ONUs on slot ${slot}`);
+          
+          // Get bound ONUs for ALL ports on this slot
+          const boundOutput = await this.executeCommand("display ont info all all");
+          const bound = this.parseBoundOnus(boundOutput, `0/${slot}/0`);
+          allBound.push(...bound);
+          console.log(`[SSH] Found ${bound.length} bound ONUs on slot ${slot}`);
+          
+          // Get optical info for bound ONUs if any (stay in interface mode)
+          if (bound.length > 0) {
+            try {
+              // Add delay to ensure shell buffer is clear after heavy display ont info command
+              const opticalOutput = await this.executeCommandWithDelay("display ont optical-info all all", 800);
+              this.enrichWithOpticalInfo(bound, opticalOutput);
+            } catch (err) {
+              console.log("[SSH] Could not get optical info:", err);
+            }
+          }
+          
+          // Get descriptions for each ONU (inside interface mode)
+          if (bound.length > 0) {
+            for (const onu of bound) {
+              try {
+                // Extract port number from gponPort (e.g., "0/1/5" -> 5)
+                const portMatch = onu.gponPort.match(/\d+\/\d+\/(\d+)/);
+                const portNum = portMatch ? portMatch[1] : "0";
+                const detailOutput = await this.executeCommand(`display ont info ${portNum} ${onu.onuId}`);
+                console.log(`[SSH] Detail for ONU ${onu.onuId}:`, detailOutput.substring(0, 500));
+                this.parseOnuDescription(onu, detailOutput);
+              } catch (err) {
+                console.log(`[SSH] Could not get description for ONU ${onu.onuId}:`, err);
+              }
+            }
+          }
+          
+          // Exit interface
+          await this.executeCommand("quit");
         } catch (err) {
-          console.log("[SSH] Could not get optical info:", err);
+          console.error(`[SSH] Error scanning slot ${slot}:`, err);
+          // Try to exit interface mode if we're stuck
+          try { await this.executeCommand("quit"); } catch {}
         }
       }
       
-      // Get descriptions for each ONU (inside interface mode)
-      // Command format: display ont info <port> <onu-id>
-      if (bound.length > 0) {
-        for (const onu of bound) {
-          try {
-            const detailOutput = await this.executeCommand(`display ont info 0 ${onu.onuId}`);
-            console.log(`[SSH] Detail for ONU ${onu.onuId}:`, detailOutput.substring(0, 500));
-            this.parseOnuDescription(onu, detailOutput);
-          } catch (err) {
-            console.log(`[SSH] Could not get description for ONU ${onu.onuId}:`, err);
+      return { unbound: allUnbound, bound: allBound };
+    } catch (err) {
+      console.error("[SSH] Error getting ONU data:", err);
+      return { unbound: [], bound: [] };
+    }
+  }
+  
+  // Detect which slots have GPON boards
+  private async detectGponSlots(): Promise<number[]> {
+    try {
+      const output = await this.executeCommand("display board 0");
+      const slots: number[] = [];
+      
+      const lines = output.split('\n');
+      for (const line of lines) {
+        // Match lines with slot and board name containing "GP": "  1       V922GPHF   Normal"
+        const match = line.match(/^\s*(\d+)\s+(\S+)\s+\S+/);
+        if (match) {
+          const slot = parseInt(match[1]);
+          const boardName = match[2].toUpperCase();
+          
+          // Check if it's a GPON board (must contain GP)
+          if (boardName.includes('GP')) {
+            slots.push(slot);
+            console.log(`[SSH] Found GPON board on slot ${slot}: ${boardName}`);
           }
         }
       }
       
-      // Exit interface
-      await this.executeCommand("quit");
+      // If no GPON boards detected, default to slot 1
+      if (slots.length === 0) {
+        console.log("[SSH] No GPON boards detected, defaulting to slot 1");
+        return [1];
+      }
       
-      return { unbound, bound };
+      return slots;
     } catch (err) {
-      console.error("[SSH] Error getting ONU data:", err);
-      return { unbound: [], bound: [] };
+      console.error("[SSH] Error detecting GPON slots:", err);
+      return [1]; // Default to slot 1
     }
   }
   
@@ -657,22 +714,37 @@ export class HuaweiSSH {
   }
 
   async getUnboundOnus(): Promise<UnboundOnu[]> {
-    let output = "";
     try {
-      // Enter GPON interface first
-      await this.executeCommand("interface gpon 0/1");
-      output = await this.executeCommand("display ont autofind 0");
-      return this.parseUnboundOnus(output, "0/1/0");
+      const allUnbound: UnboundOnu[] = [];
+      
+      // Detect which slots have GPON boards
+      const gponSlots = await this.detectGponSlots();
+      console.log(`[SSH] Getting unbound ONUs from slots: ${gponSlots.join(", ")}`);
+      
+      // Scan each GPON slot
+      for (const slot of gponSlots) {
+        try {
+          // Enter GPON interface for this slot
+          await this.executeCommand(`interface gpon 0/${slot}`);
+          
+          // Get autofind (unbound) for ALL ports on this slot
+          const output = await this.executeCommand("display ont autofind all");
+          const unbound = this.parseUnboundOnus(output, `0/${slot}/0`);
+          allUnbound.push(...unbound);
+          console.log(`[SSH] Found ${unbound.length} unbound ONUs on slot ${slot}`);
+          
+          // Exit interface
+          await this.executeCommand("quit");
+        } catch (err) {
+          console.error(`[SSH] Error scanning slot ${slot}:`, err);
+          try { await this.executeCommand("quit"); } catch {}
+        }
+      }
+      
+      return allUnbound;
     } catch (err) {
       console.error("[SSH] Error getting unbound ONUs:", err);
       return [];
-    } finally {
-      // Always exit interface back to config mode
-      try {
-        await this.executeCommand("quit");
-      } catch (e) {
-        console.log("[SSH] Error during quit:", e);
-      }
     }
   }
 
