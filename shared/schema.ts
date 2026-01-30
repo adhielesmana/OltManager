@@ -315,6 +315,7 @@ export type ServiceProfile = z.infer<typeof serviceProfileSchema>;
 
 export const vlanSchema = z.object({
   id: z.number(),
+  vlanId: z.number(), // Actual VLAN ID (e.g., 81, 100, 1360)
   name: z.string(),
   description: z.string(),
   type: z.enum(["smart", "mux", "standard"]),
@@ -333,11 +334,15 @@ export const bindOnuRequestSchema = z.object({
   lineProfileId: z.number().min(1, "Line profile is required"),
   serviceProfileId: z.number().min(1, "Service profile is required"),
   description: z.string().min(1, "Description is required"),
-  vlanId: z.number().optional(),
+  vlanId: z.number().optional(), // PPPoE/Data VLAN
   pppoeUsername: z.string().optional(),
   pppoePassword: z.string().optional(),
   onuType: onuTypeSchema.default("huawei"),
   onuPassword: z.string().optional(), // Hex password from autofind for general ONUs
+  // Management VLAN for DHCP (ip-index 1) - e.g., VLAN 81
+  managementVlanId: z.number().optional(),
+  // TR-069 ACS profile name - e.g., "SURGE_ACS"
+  tr069ProfileName: z.string().optional(),
 });
 export type BindOnuRequest = z.infer<typeof bindOnuRequestSchema>;
 

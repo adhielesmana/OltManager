@@ -290,7 +290,8 @@ export class DatabaseStorage implements IStorage {
 
   private dbVlanToApi(dbVlan: any): Vlan {
     return {
-      id: dbVlan.vlanId,
+      id: dbVlan.id, // Database primary key
+      vlanId: dbVlan.vlanId, // Actual VLAN ID (e.g., 81, 100, 1360)
       name: dbVlan.name,
       description: dbVlan.description || "",
       type: (dbVlan.type || "standard") as "smart" | "mux" | "standard",

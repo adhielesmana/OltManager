@@ -81,6 +81,8 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
       pppoeUsername: "",
       pppoePassword: "",
       onuType: "huawei",
+      managementVlanId: undefined,
+      tr069ProfileName: "",
     },
   });
 
@@ -99,6 +101,8 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
         pppoeUsername: "",
         pppoePassword: "",
         onuType: "huawei",
+        managementVlanId: undefined,
+        tr069ProfileName: "",
       });
       setSelectedPort(selectedOnu.gponPort || "0/1/0");
       setValidationStatus("idle");
@@ -113,6 +117,8 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
         pppoeUsername: "",
         pppoePassword: "",
         onuType: "huawei",
+        managementVlanId: undefined,
+        tr069ProfileName: "",
       });
       setSelectedPort("0/1/0");
       setValidationStatus("idle");
@@ -403,7 +409,7 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
                 name="vlanId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>VLAN (Optional)</FormLabel>
+                    <FormLabel>PPPoE/Data VLAN</FormLabel>
                     <Select
                       onValueChange={(v) => field.onChange(v === "auto" ? undefined : parseInt(v))}
                       value={field.value?.toString() || "auto"}
@@ -417,11 +423,60 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
                         <SelectItem value="auto">Auto-assign</SelectItem>
                         {availableVlans.map((v) => (
                           <SelectItem key={v.id} value={v.id.toString()}>
-                            VLAN {v.id} - {v.name}
+                            VLAN {v.vlanId} - {v.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="managementVlanId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Management VLAN (Optional)</FormLabel>
+                    <Select
+                      onValueChange={(v) => field.onChange(v === "none" ? undefined : parseInt(v))}
+                      value={field.value?.toString() || "none"}
+                    >
+                      <FormControl>
+                        <SelectTrigger data-testid="select-management-vlan">
+                          <SelectValue placeholder="None" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        {availableVlans.map((v) => (
+                          <SelectItem key={v.id} value={v.vlanId.toString()}>
+                            VLAN {v.vlanId} - {v.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>DHCP management (ip-index 1)</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="tr069ProfileName"
+                render={({ field }) => (
+                  <FormItem className="col-span-2">
+                    <FormLabel>TR-069 ACS Profile (Optional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="e.g., SURGE_ACS"
+                        {...field}
+                        data-testid="input-tr069-profile"
+                      />
+                    </FormControl>
+                    <FormDescription>ACS server profile for remote management</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

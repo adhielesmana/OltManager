@@ -1695,6 +1695,7 @@ export class HuaweiSSH {
         if (!isNaN(id) && id > 0 && id < 4095) {
           vlans.push({
             id: id,
+            vlanId: id, // Actual VLAN ID
             name: `VLAN ${id}`,
             description: `${type} - ${attribute}`,
             type: type as "smart" | "mux" | "standard",
