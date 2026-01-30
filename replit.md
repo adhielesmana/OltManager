@@ -4,6 +4,11 @@
 A professional network operations management application for Huawei MA5801 OLT devices. This tool helps network operators manage GPON ONUs with safety guardrails to prevent accidental misconfigurations.
 
 ## Recent Changes (January 2026)
+- **Management VLAN and TR-069 ACS Support**: Optional configuration during ONU binding
+  - Management VLAN: DHCP configuration on ip-index 1 for management network
+  - TR-069 ACS Profile: Auto-provisioning server configuration
+  - Dual Service-Ports: Management VLAN (translate) + Data VLAN (transparent)
+  - Settings persisted in database for database-first consistency
 - **Optimized Data Refresh Architecture**: Per-feature reload buttons instead of batch updates
   - Bound ONUs: Reload button on Bound ONU page
   - Unbound ONUs: Background check every 5 minutes + reload button
