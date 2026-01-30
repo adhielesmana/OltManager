@@ -92,7 +92,7 @@ export class DatabaseStorage implements IStorage {
     console.log("[Storage] Database storage initialized - data served from database");
     // Auto-reconnect to active OLT after startup
     setTimeout(() => this.autoReconnectOlt(), 2000);
-    // Start auto-sync every 5 minutes for ONUs
+    // Start auto-sync every 30 minutes for ONUs
     this.startAutoSync();
     // Schedule daily GPON port refresh at midnight
     this.scheduleMidnightRefresh();
@@ -104,9 +104,10 @@ export class DatabaseStorage implements IStorage {
       clearInterval(this.autoSyncInterval);
     }
     
-    // Auto-sync every 5 minutes (300000 ms) - includes both unbound AND bound ONUs
-    const SYNC_INTERVAL = 5 * 60 * 1000;
-    console.log("[Storage] Auto-sync enabled: checking unbound AND bound ONUs every 5 minutes");
+    // Auto-sync every 30 minutes (1800000 ms) - includes both unbound AND bound ONUs
+    // UI shows static database data during idle periods between syncs
+    const SYNC_INTERVAL = 30 * 60 * 1000;
+    console.log("[Storage] Auto-sync enabled: checking unbound AND bound ONUs every 30 minutes");
     
     this.autoSyncInterval = setInterval(async () => {
       await this.runAutoSync();
