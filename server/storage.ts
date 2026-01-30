@@ -785,25 +785,37 @@ export class DatabaseStorage implements IStorage {
         const sshOnu = sshBySerial.get(dbOnu.serialNumber);
         
         if (sshOnu && sshOnu.gponPort === dbOnu.gponPort && sshOnu.onuId === dbOnu.onuId) {
-          // MATCH: Same SN at same position - UPDATE only volatile fields (status, rx/tx, wifi)
-          console.log(`[Storage] MATCH: ${dbOnu.serialNumber} at ${dbOnu.gponPort}/${dbOnu.onuId} - updating status/signal/wifi only`);
+          // MATCH: Same SN at same position - UPDATE only volatile fields
+          // IMPORTANT: Only update rxPower/description if SSH returned VALID data
+          // If SSH parsing failed (garbled output), keep existing DB values
+          const hasValidRx = sshOnu.rxPower !== undefined && sshOnu.rxPower !== null;
+          const hasValidDesc = sshOnu.description && sshOnu.description.trim().length > 0;
+          
+          console.log(`[Storage] MATCH: ${dbOnu.serialNumber} at ${dbOnu.gponPort}/${dbOnu.onuId} - rx=${hasValidRx ? sshOnu.rxPower : 'keep'}, desc=${hasValidDesc ? 'update' : 'keep'}`);
+          
           await db.update(boundOnus)
             .set({
               status: sshOnu.status,
               configState: sshOnu.configState,
-              rxPower: sshOnu.rxPower ?? dbOnu.rxPower,
-              txPower: sshOnu.txPower ?? dbOnu.txPower,
-              distance: sshOnu.distance ?? dbOnu.distance,
-              // Only update WiFi if SSH returned new values (customer may have changed)
+              // Only update power/distance if SSH returned valid values
+              rxPower: hasValidRx ? sshOnu.rxPower : dbOnu.rxPower,
+              txPower: sshOnu.txPower !== undefined ? sshOnu.txPower : dbOnu.txPower,
+              distance: sshOnu.distance !== undefined ? sshOnu.distance : dbOnu.distance,
+              // Only update WiFi if SSH returned new values
               wifiSsid: sshOnu.wifiSsid || dbOnu.wifiSsid,
               wifiPassword: sshOnu.wifiPassword || dbOnu.wifiPassword,
-              // Update description only if SSH has one and DB is empty
-              description: dbOnu.description || sshOnu.description || "",
+              // Only update description if SSH returned valid value OR DB is empty
+              description: hasValidDesc ? sshOnu.description : (dbOnu.description || ""),
+              // Update pppoe if SSH has it
+              pppoeUsername: sshOnu.pppoeUsername || dbOnu.pppoeUsername,
             })
             .where(eq(boundOnus.id, dbOnu.id));
           updated++;
         } else if (sshOnu) {
           // SN exists but at different position - UPDATE position and volatile fields
+          const hasValidRx = sshOnu.rxPower !== undefined && sshOnu.rxPower !== null;
+          const hasValidDesc = sshOnu.description && sshOnu.description.trim().length > 0;
+          
           console.log(`[Storage] MOVED: ${dbOnu.serialNumber} moved from ${dbOnu.gponPort}/${dbOnu.onuId} to ${sshOnu.gponPort}/${sshOnu.onuId}`);
           await db.update(boundOnus)
             .set({
@@ -811,14 +823,15 @@ export class DatabaseStorage implements IStorage {
               onuId: sshOnu.onuId,
               status: sshOnu.status,
               configState: sshOnu.configState,
-              rxPower: sshOnu.rxPower ?? dbOnu.rxPower,
-              txPower: sshOnu.txPower ?? dbOnu.txPower,
-              distance: sshOnu.distance ?? dbOnu.distance,
+              rxPower: hasValidRx ? sshOnu.rxPower : dbOnu.rxPower,
+              txPower: sshOnu.txPower !== undefined ? sshOnu.txPower : dbOnu.txPower,
+              distance: sshOnu.distance !== undefined ? sshOnu.distance : dbOnu.distance,
               wifiSsid: sshOnu.wifiSsid || dbOnu.wifiSsid,
               wifiPassword: sshOnu.wifiPassword || dbOnu.wifiPassword,
-              description: dbOnu.description || sshOnu.description || "",
+              description: hasValidDesc ? sshOnu.description : (dbOnu.description || ""),
               lineProfileId: sshOnu.lineProfileId,
               serviceProfileId: sshOnu.serviceProfileId,
+              pppoeUsername: sshOnu.pppoeUsername || dbOnu.pppoeUsername,
             })
             .where(eq(boundOnus.id, dbOnu.id));
           updated++;
