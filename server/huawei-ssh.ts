@@ -2088,13 +2088,47 @@ export class HuaweiSSH {
       console.log(`[SSH] Config mode result: ${configResult.substring(0, 100)}`);
       await new Promise(resolve => setTimeout(resolve, 500));
       
-      // Step 2: Delete all service ports for this ONU using single command
-      // Format: undo service-port port F/S/P ont OnuID
-      const undoSpCmd = "undo service-port port " + String(frame) + "/" + String(slot) + "/" + String(port) + " ont " + String(onuId);
-      console.log(`[SSH] Step 2: Deleting service ports with: ${undoSpCmd}`);
-      const undoSpResult = await this.executeCommand(undoSpCmd);
-      console.log(`[SSH] Service port deletion result: ${undoSpResult.substring(0, 300)}`);
-      await new Promise(resolve => setTimeout(resolve, 800));
+      // Step 2: Find and delete all service ports for this ONU
+      // First, find service-port indexes by querying: display service-port port F/S/P ont OnuID
+      const findSpCmd = `display service-port port ${frame}/${slot}/${port} ont ${onuId}`;
+      console.log(`[SSH] Step 2a: Finding service ports with: ${findSpCmd}`);
+      const findSpResult = await this.executeCommandWithDelay(findSpCmd, 800);
+      console.log(`[SSH] Service port query result: ${findSpResult.substring(0, 500)}`);
+      
+      // Parse service-port indexes from output
+      // Format: INDEX  VLAN  VLAN TYPE  ...  F/S/P  ONT
+      //         123    100   common     ...  0/1/0  0
+      const spIndexes: number[] = [];
+      const lines = findSpResult.split('\n');
+      for (const line of lines) {
+        // Match lines that start with a number (the service-port index)
+        const match = line.trim().match(/^(\d+)\s+/);
+        if (match) {
+          const idx = parseInt(match[1]);
+          if (!isNaN(idx) && idx > 0) {
+            spIndexes.push(idx);
+          }
+        }
+      }
+      console.log(`[SSH] Found ${spIndexes.length} service-port indexes: ${spIndexes.join(', ')}`);
+      
+      // Delete each service-port by index
+      for (const spIndex of spIndexes) {
+        const undoSpCmd = `undo service-port ${spIndex}`;
+        console.log(`[SSH] Step 2b: Deleting service-port ${spIndex} with: ${undoSpCmd}`);
+        const undoResult = await this.executeCommandWithDelay(undoSpCmd, 800);
+        console.log(`[SSH] Service-port ${spIndex} deletion result: ${undoResult.substring(0, 200)}`);
+      }
+      
+      // If no service-ports found via query, try the bulk delete command as fallback
+      if (spIndexes.length === 0) {
+        const undoSpCmd = `undo service-port port ${frame}/${slot}/${port} ont ${onuId}`;
+        console.log(`[SSH] Step 2c: Trying bulk service-port deletion: ${undoSpCmd}`);
+        const undoSpResult = await this.executeCommandWithDelay(undoSpCmd, 800);
+        console.log(`[SSH] Bulk service-port deletion result: ${undoSpResult.substring(0, 300)}`);
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Step 3: Enter GPON interface (config -> interface gpon F/S)
       const ifCmd = `interface gpon ${frame}/${slot}`;
