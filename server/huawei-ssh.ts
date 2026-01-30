@@ -1794,6 +1794,8 @@ export class HuaweiSSH {
     wifiPassword?: string;
     enableRemoteAccess?: boolean;
     onuPassword?: string; // Hex password from autofind for general ONUs (e.g., "0x4743433941424230390")
+    managementVlanId?: number; // Optional management VLAN for DHCP (e.g., 81)
+    tr069ProfileName?: string; // Optional TR-069 ACS profile (e.g., "SURGE_ACS")
   }): Promise<{ success: boolean; message: string; wifiSsid?: string; wifiPassword?: string }> {
     if (!this.isConnected()) {
       return { success: false, message: "Not connected to OLT" };
@@ -1811,7 +1813,7 @@ export class HuaweiSSH {
         serialNumber, gponPort, onuId, lineProfileName, serviceProfileName, 
         description, vlanId, gemportId, pppoeUsername, pppoePassword, 
         onuType = "huawei", wifiSsid, wifiPassword, enableRemoteAccess = true,
-        onuPassword
+        onuPassword, managementVlanId, tr069ProfileName
       } = params;
       
       // Default WiFi credentials - fixed names for all ONUs
@@ -1829,6 +1831,8 @@ export class HuaweiSSH {
       const isGeneral = onuType === "general";
       console.log(`[SSH] Binding ${isGeneral ? "General" : "Huawei"} ONU ${serialNumber} to port ${gponPort} as ONU ID ${onuId}`);
       console.log(`[SSH] Profiles: line=${lineProfileName}, service=${serviceProfileName}, vlan=${vlanId}`);
+      if (managementVlanId) console.log(`[SSH] Management VLAN: ${managementVlanId}`);
+      if (tr069ProfileName) console.log(`[SSH] TR-069 Profile: ${tr069ProfileName}`);
 
       // Step 1: Enter config mode
       console.log(`[SSH] Step 1: Entering config mode...`);
@@ -1918,27 +1922,66 @@ export class HuaweiSSH {
         console.log(`[SSH] Port route result: ${portRouteResult.substring(0, 100)}`);
       }
 
+      // Step 8a: Configure Management VLAN with DHCP (ip-index 1) if specified
+      if (managementVlanId && !isGeneral) {
+        console.log(`[SSH] Step 8a: Configuring Management VLAN ${managementVlanId} with DHCP (ip-index 1)...`);
+        // ont ipconfig PORT ONU_ID ip-index 1 dhcp vlan VLAN priority 0
+        const mgmtDhcpCmd = "ont ipconfig " + slotPort + " ip-index 1 dhcp vlan " + String(managementVlanId) + " priority 0";
+        console.log(`[SSH] Management DHCP command: ${mgmtDhcpCmd}`);
+        const mgmtDhcpResult = await this.executeCommandWithDelay(mgmtDhcpCmd, 800);
+        console.log(`[SSH] Management DHCP result: ${mgmtDhcpResult.substring(0, 200)}`);
+      }
+
+      // Step 8b: Configure TR-069 ACS profile if specified
+      if (tr069ProfileName && !isGeneral) {
+        console.log(`[SSH] Step 8b: Configuring TR-069 ACS profile "${tr069ProfileName}"...`);
+        // ont tr069-server-config PORT ONU_ID profile-name PROFILE
+        const tr069Cmd = "ont tr069-server-config " + slotPort + " profile-name " + tr069ProfileName;
+        console.log(`[SSH] TR-069 command: ${tr069Cmd}`);
+        const tr069Result = await this.executeCommandWithDelay(tr069Cmd, 800);
+        console.log(`[SSH] TR-069 result: ${tr069Result.substring(0, 200)}`);
+      }
+
       // Exit GPON interface first
       await this.executeCommand("quit");
 
-      // Step 9: Create service-port to map VLAN (CRITICAL for VLAN passthrough)
-      // This is required for both PPPoE and bridge mode
+      // Step 9a: Create service-port for Management VLAN (if specified)
+      // Format: service-port vlan [MGMT_VLAN] gpon [F/S/P] ont [ONU_ID] gemport [GEMPORT] multi-service user-vlan [MGMT_VLAN] tag-transform translate
+      if (managementVlanId) {
+        console.log(`[SSH] Step 9a: Creating service-port for Management VLAN ${managementVlanId} (tag-transform translate)...`);
+        const mgmtServicePortCmd = "service-port vlan " + String(managementVlanId) + 
+          " gpon " + gponPort + 
+          " ont " + String(onuId) + 
+          " gemport " + String(gemportId) + " multi-service user-vlan " + String(managementVlanId) + 
+          " tag-transform translate";
+        console.log(`[SSH] Management service-port command: ${mgmtServicePortCmd}`);
+        const mgmtServicePortResult = await this.executeCommandWithDelay(mgmtServicePortCmd, 800);
+        console.log(`[SSH] Management service-port result:\n${mgmtServicePortResult.substring(0, 200)}`);
+        
+        if (mgmtServicePortResult.includes("Failure") || mgmtServicePortResult.includes("Error")) {
+          console.error(`[SSH] WARNING: Management service-port creation failed: ${mgmtServicePortResult.substring(0, 200)}`);
+        } else {
+          console.log(`[SSH] Management service-port created successfully`);
+        }
+      }
+
+      // Step 9b: Create service-port for Data/PPPoE VLAN (CRITICAL for VLAN passthrough)
       // Format: service-port vlan [VLAN] gpon [F/S/P] ont [ONU_ID] gemport [GEMPORT] multi-service user-vlan [VLAN] tag-transform transparent
-      console.log(`[SSH] Step 9: Creating service-port for VLAN ${vlanId} with gemport ${gemportId}...`);
+      console.log(`[SSH] Step 9b: Creating service-port for Data VLAN ${vlanId} (tag-transform transparent)...`);
       const servicePortCmd = "service-port vlan " + String(vlanId) + 
         " gpon " + gponPort + 
         " ont " + String(onuId) + 
         " gemport " + String(gemportId) + " multi-service user-vlan " + String(vlanId) + 
         " tag-transform transparent";
-      console.log(`[SSH] Service-port command: ${servicePortCmd}`);
-      const servicePortResult = await this.executeCommand(servicePortCmd);
-      console.log(`[SSH] Service-port full result:\n${servicePortResult}`);
+      console.log(`[SSH] Data service-port command: ${servicePortCmd}`);
+      const servicePortResult = await this.executeCommandWithDelay(servicePortCmd, 800);
+      console.log(`[SSH] Data service-port result:\n${servicePortResult.substring(0, 200)}`);
 
       if (servicePortResult.includes("Failure") || servicePortResult.includes("Error") || servicePortResult.includes("error")) {
-        console.error(`[SSH] ERROR: Service-port creation failed: ${servicePortResult}`);
+        console.error(`[SSH] ERROR: Data service-port creation failed: ${servicePortResult}`);
         // Don't return failure - the ONU is already bound, just log warning
       } else if (servicePortResult.includes("success") || servicePortResult.includes("Index")) {
-        console.log(`[SSH] Service-port created successfully`);
+        console.log(`[SSH] Data service-port created successfully`);
       }
 
       // Step 10: Configure WiFi SSID and Password for Huawei ONUs via OMCI

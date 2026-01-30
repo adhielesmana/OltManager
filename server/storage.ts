@@ -264,6 +264,8 @@ export class DatabaseStorage implements IStorage {
       pppoePassword: dbOnu.pppoePassword ?? undefined,
       wifiSsid: dbOnu.wifiSsid ?? undefined,
       wifiPassword: dbOnu.wifiPassword ?? undefined,
+      managementVlanId: dbOnu.managementVlanId ?? undefined,
+      tr069ProfileName: dbOnu.tr069ProfileName ?? undefined,
     };
   }
 
@@ -1395,6 +1397,8 @@ export class DatabaseStorage implements IStorage {
       gemportId: lineProfile.gemportId,
       pppoeUsername: request.pppoeUsername || null,
       pppoePassword: request.pppoePassword || null,
+      managementVlanId: managementVlanId || null,
+      tr069ProfileName: request.tr069ProfileName || null,
       oltCredentialId: credential.id,
       boundAt: new Date(),
     }).returning();
