@@ -1354,15 +1354,28 @@ export class DatabaseStorage implements IStorage {
       throw new Error("Service profile does not exist");
     }
     
+    // Validate and get PPPoE/Data VLAN
+    let dataVlanId = 200; // Default data VLAN
     if (request.vlanId) {
       const vlan = dbVlans.find(v => v.id === request.vlanId);
       if (!vlan) {
-        throw new Error("VLAN does not exist");
+        throw new Error("Data VLAN does not exist");
       }
+      dataVlanId = vlan.vlanId; // Use actual VLAN ID, not database primary key
+    }
+    
+    // Validate and get Management VLAN (optional)
+    let managementVlanId: number | undefined = undefined;
+    if (request.managementVlanId) {
+      const mgmtVlan = dbVlans.find(v => v.id === request.managementVlanId);
+      if (!mgmtVlan) {
+        throw new Error("Management VLAN does not exist");
+      }
+      managementVlanId = mgmtVlan.vlanId; // Use actual VLAN ID
     }
     
     const onuId = await this.getNextFreeOnuId(request.gponPort);
-    const vlanId = request.vlanId || 200;
+    const vlanId = dataVlanId;
     
     // Insert into database FIRST (fast response)
     // SSH commands will run in background
@@ -1414,6 +1427,8 @@ export class DatabaseStorage implements IStorage {
             pppoePassword: request.pppoePassword,
             onuType: request.onuType || "huawei",
             onuPassword: request.onuPassword, // Hex password for general ONUs
+            managementVlanId, // Optional management VLAN for DHCP
+            tr069ProfileName: request.tr069ProfileName, // Optional TR-069 ACS profile
           });
           
           if (bindResult.success) {
