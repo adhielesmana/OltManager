@@ -1965,14 +1965,15 @@ export class HuaweiSSH {
         }
       }
 
-      // Step 9b: Create service-port for Data/PPPoE VLAN (CRITICAL for VLAN passthrough)
-      // Format: service-port vlan [VLAN] gpon [F/S/P] ont [ONU_ID] gemport [GEMPORT] multi-service user-vlan [VLAN] tag-transform transparent
-      console.log(`[SSH] Step 9b: Creating service-port for Data VLAN ${vlanId} (tag-transform transparent)...`);
+      // Step 9b: Create service-port for Data/PPPoE VLAN
+      // For PPPoE (ONU router mode): user LAN is untagged, ONU adds VLAN tag → use translate
+      // Format: service-port vlan [VLAN] gpon [F/S/P] ont [ONU_ID] gemport [GEMPORT] multi-service user-vlan [VLAN] tag-transform translate
+      console.log(`[SSH] Step 9b: Creating service-port for Data VLAN ${vlanId} (tag-transform translate)...`);
       const servicePortCmd = "service-port vlan " + String(vlanId) + 
         " gpon " + gponPort + 
         " ont " + String(onuId) + 
         " gemport " + String(gemportId) + " multi-service user-vlan " + String(vlanId) + 
-        " tag-transform transparent";
+        " tag-transform translate";
       console.log(`[SSH] Data service-port command: ${servicePortCmd}`);
       const servicePortResult = await this.executeCommandWithDelay(servicePortCmd, 800);
       console.log(`[SSH] Data service-port result:\n${servicePortResult.substring(0, 200)}`);
