@@ -1463,6 +1463,11 @@ export class DatabaseStorage implements IStorage {
             } else {
               console.log(`[Storage] Could not get optical info for ONU ${sn} after 3 attempts`);
             }
+            
+            // Immediate refresh after successful bind - update database and UI
+            console.log(`[Storage] Triggering immediate refresh after bind of ${sn}`);
+            this.refreshBoundOnus().catch(err => console.log(`[Storage] Post-bind refresh error: ${err.message}`));
+            this.refreshUnboundOnus().catch(err => console.log(`[Storage] Post-bind unbound refresh error: ${err.message}`));
           } else {
             console.error(`[Storage] SSH bind failed for ONU ${sn}: ${bindResult.message}`);
             // Delete from bound list since bind failed - ONU stays in unbound list
@@ -1538,6 +1543,11 @@ export class DatabaseStorage implements IStorage {
     } catch (err) {
       console.log(`[Storage] Could not add unbound ONU ${serialNumber} to database: ${err}`);
     }
+    
+    // Immediate refresh after successful unbind - update database and UI
+    console.log(`[Storage] Triggering immediate refresh after unbind of ${serialNumber}`);
+    this.refreshBoundOnus().catch(err => console.log(`[Storage] Post-unbind refresh error: ${err.message}`));
+    this.refreshUnboundOnus().catch(err => console.log(`[Storage] Post-unbind unbound refresh error: ${err.message}`));
   }
 }
 
