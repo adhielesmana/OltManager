@@ -2097,16 +2097,26 @@ export class HuaweiSSH {
       await new Promise(resolve => setTimeout(resolve, 800));
 
       // Step 3: Enter GPON interface (config -> interface gpon F/S)
-      const ifCmd = "interface gpon " + String(frame) + "/" + String(slot);
+      const ifCmd = `interface gpon ${frame}/${slot}`;
       console.log(`[SSH] Step 3: Entering interface with: ${ifCmd}`);
-      const ifResult = await this.executeCommand(ifCmd);
+      const ifResult = await this.executeCommandWithDelay(ifCmd, 800);
       console.log(`[SSH] Interface result: ${ifResult.substring(0, 200)}`);
-      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Verify we're in interface mode
+      if (ifResult.includes("Unknown command") || ifResult.includes("Error")) {
+        console.log(`[SSH] Failed to enter interface mode, retrying...`);
+        await this.executeCommand("quit");
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await this.executeCommand("config");
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await this.executeCommandWithDelay(ifCmd, 800);
+      }
       
       // Step 4: Delete the ONU using "ont delete [PortID] [OnuID]" command
-      const deleteCmd = "ont delete " + String(port) + " " + String(onuId);
+      // Must be inside interface gpon mode!
+      const deleteCmd = `ont delete ${port} ${onuId}`;
       console.log(`[SSH] Step 4: Deleting ONU with: ${deleteCmd}`);
-      const deleteResult = await this.executeCommand(deleteCmd);
+      const deleteResult = await this.executeCommandWithDelay(deleteCmd, 1000);
       console.log(`[SSH] Delete result: ${deleteResult.substring(0, 300)}`);
 
       // Check for errors
