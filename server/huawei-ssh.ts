@@ -1932,8 +1932,8 @@ export class HuaweiSSH {
         console.log(`[SSH] Management DHCP result: ${mgmtDhcpResult.substring(0, 200)}`);
       }
 
-      // Step 8b: Configure TR-069 ACS profile if specified
-      if (tr069ProfileName && !isGeneral) {
+      // Step 8b: Configure TR-069 ACS profile if specified (works for both Huawei and General ONUs)
+      if (tr069ProfileName) {
         console.log(`[SSH] Step 8b: Configuring TR-069 ACS profile "${tr069ProfileName}"...`);
         // ont tr069-server-config PORT ONU_ID profile-name PROFILE
         const tr069Cmd = "ont tr069-server-config " + slotPort + " profile-name " + tr069ProfileName;
@@ -1965,15 +1965,16 @@ export class HuaweiSSH {
         }
       }
 
-      // Step 9b: Create service-port for Data/PPPoE VLAN
-      // For PPPoE (ONU router mode): user LAN is untagged, ONU adds VLAN tag → use translate
-      // Format: service-port vlan [VLAN] gpon [F/S/P] ont [ONU_ID] gemport [GEMPORT] multi-service user-vlan [VLAN] tag-transform translate
-      console.log(`[SSH] Step 9b: Creating service-port for Data VLAN ${vlanId} (tag-transform translate)...`);
+      // Step 9b: Create service-port for Data VLAN
+      // Huawei ONU (PPPoE router mode): user LAN is untagged, ONU adds VLAN tag → translate
+      // General ONU (bridge mode): VLAN passes through unchanged, DHCP from ISP router → transparent
+      const dataTagTransform = isGeneral ? "transparent" : "translate";
+      console.log(`[SSH] Step 9b: Creating service-port for Data VLAN ${vlanId} (tag-transform ${dataTagTransform})...`);
       const servicePortCmd = "service-port vlan " + String(vlanId) + 
         " gpon " + gponPort + 
         " ont " + String(onuId) + 
         " gemport " + String(gemportId) + " multi-service user-vlan " + String(vlanId) + 
-        " tag-transform translate";
+        " tag-transform " + dataTagTransform;
       console.log(`[SSH] Data service-port command: ${servicePortCmd}`);
       const servicePortResult = await this.executeCommandWithDelay(servicePortCmd, 800);
       console.log(`[SSH] Data service-port result:\n${servicePortResult.substring(0, 200)}`);
