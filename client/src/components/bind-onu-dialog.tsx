@@ -65,25 +65,30 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
 
   // Auto-refresh TR-069 profiles if none exist when dialog opens
   const [tr069AutoRefreshed, setTr069AutoRefreshed] = useState(false);
-  const refreshTr069Mutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/tr069-profiles/refresh");
-      return res.json();
-    },
-    onSuccess: () => {
+  const [tr069Refreshing, setTr069Refreshing] = useState(false);
+  
+  const refreshTr069Profiles = async () => {
+    if (tr069Refreshing) return;
+    setTr069Refreshing(true);
+    try {
+      await apiRequest("POST", "/api/tr069-profiles/refresh");
       queryClient.invalidateQueries({ queryKey: ["/api/tr069-profiles"] });
-    },
-  });
+    } catch (e) {
+      console.error("Failed to refresh TR-069 profiles:", e);
+    } finally {
+      setTr069Refreshing(false);
+    }
+  };
 
   useEffect(() => {
-    if (open && !tr069Loading && tr069Profiles.length === 0 && !tr069AutoRefreshed && !refreshTr069Mutation.isPending) {
+    if (open && !tr069Loading && tr069Profiles.length === 0 && !tr069AutoRefreshed && !tr069Refreshing) {
       setTr069AutoRefreshed(true);
-      refreshTr069Mutation.mutate();
+      refreshTr069Profiles();
     }
     if (!open) {
       setTr069AutoRefreshed(false);
     }
-  }, [open, tr069Loading, tr069Profiles.length, tr069AutoRefreshed, refreshTr069Mutation.isPending]);
+  }, [open, tr069Loading, tr069Profiles.length, tr069AutoRefreshed, tr069Refreshing]);
 
   const { data: gponPorts = [] } = useQuery<string[]>({
     queryKey: ["/api/gpon-ports"],
@@ -499,11 +504,11 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
                     <Select
                       onValueChange={(val) => field.onChange(val === "__none__" ? "" : val)}
                       value={field.value || "__none__"}
-                      disabled={refreshTr069Mutation.isPending}
+                      disabled={tr069Refreshing}
                     >
                       <FormControl>
                         <SelectTrigger data-testid="select-tr069-profile">
-                          <SelectValue placeholder={refreshTr069Mutation.isPending ? "Loading profiles..." : "Select ACS profile (optional)"} />
+                          <SelectValue placeholder={tr069Refreshing ? "Loading profiles..." : "Select ACS profile (optional)"} />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
@@ -521,7 +526,7 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
                       </SelectContent>
                     </Select>
                     <FormDescription>
-                      {refreshTr069Mutation.isPending
+                      {tr069Refreshing
                         ? "Loading ACS profiles from OLT..."
                         : tr069Profiles.length === 0 
                           ? "No ACS profiles on OLT" 
