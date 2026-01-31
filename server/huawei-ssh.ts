@@ -1716,15 +1716,87 @@ export class HuaweiSSH {
     try {
       console.log("[SSH] Fetching TR-069 profiles...");
       
-      // Execute display tr069-server-config all command
-      const output = await this.executeCommand("display tr069-server-config all");
-      console.log(`[SSH] TR-069 profiles raw output:\n${output.substring(0, 500)}`);
+      // Try multiple command formats (different Huawei OLT versions use different commands)
+      const commands = [
+        "display tr069-server-config all",
+        "display current-configuration section-config | include tr069-server-config",
+        "display tr069-server-config"
+      ];
       
-      return this.parseTr069Profiles(output);
+      for (const cmd of commands) {
+        console.log(`[SSH] Trying: ${cmd}`);
+        const output = await this.executeCommand(cmd);
+        console.log(`[SSH] TR-069 profiles raw output:\n${output.substring(0, 500)}`);
+        
+        // Check if command was recognized (not "Unknown command")
+        if (!output.toLowerCase().includes("unknown command") && 
+            !output.toLowerCase().includes("% error") &&
+            !output.toLowerCase().includes("failure")) {
+          const profiles = this.parseTr069Profiles(output);
+          if (profiles.length > 0) {
+            return profiles;
+          }
+          // If first successful command returns no profiles, try parsing config section format
+          const configProfiles = this.parseTr069FromConfig(output);
+          if (configProfiles.length > 0) {
+            return configProfiles;
+          }
+        }
+      }
+      
+      console.log("[SSH] No TR-069 profiles found with any command format");
+      return [];
     } catch (err) {
       console.error("[SSH] Error getting TR-069 profiles:", err);
       return [];
     }
+  }
+  
+  // Parse TR-069 profiles from running config output
+  private parseTr069FromConfig(output: string): { name: string; acsUrl?: string; username?: string }[] {
+    const profiles: { name: string; acsUrl?: string; username?: string }[] = [];
+    
+    // Look for profile definitions in config format like:
+    // tr069-server-config profile-name PROFILE_NAME
+    //   acs-url http://example.com
+    //   username admin
+    const lines = output.split("\n");
+    let currentProfile: { name: string; acsUrl?: string; username?: string } | null = null;
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      
+      // Match: tr069-server-config profile-name PROFILE_NAME
+      const profileMatch = trimmed.match(/tr069-server-config\s+profile-name\s+(\S+)/i);
+      if (profileMatch) {
+        if (currentProfile && currentProfile.name) {
+          profiles.push(currentProfile);
+        }
+        currentProfile = { name: profileMatch[1] };
+        continue;
+      }
+      
+      // Match: acs-url URL
+      const acsMatch = trimmed.match(/^acs-url\s+(.+)/i);
+      if (acsMatch && currentProfile) {
+        currentProfile.acsUrl = acsMatch[1].trim();
+        continue;
+      }
+      
+      // Match: username USERNAME
+      const userMatch = trimmed.match(/^username\s+(\S+)/i);
+      if (userMatch && currentProfile) {
+        currentProfile.username = userMatch[1];
+        continue;
+      }
+    }
+    
+    if (currentProfile && currentProfile.name) {
+      profiles.push(currentProfile);
+    }
+    
+    console.log(`[SSH] Parsed ${profiles.length} TR-069 profiles from config format`);
+    return profiles;
   }
 
   private parseTr069Profiles(output: string): { name: string; acsUrl?: string; username?: string }[] {
