@@ -164,7 +164,7 @@ export class DatabaseStorage implements IStorage {
   private async runAutoSync(): Promise<void> {
     try {
       if (huaweiSSH.isConnected()) {
-        console.log("[Storage] Auto-sync: Updating unbound and bound ONUs...");
+        console.log("[Storage] Auto-sync: Updating unbound and bound ONUs, TR-069 profiles...");
         
         // Update unbound ONUs
         const unboundResult = await this.refreshUnboundOnus();
@@ -180,6 +180,14 @@ export class DatabaseStorage implements IStorage {
           console.log("[Storage] Auto-sync: Bound ONUs updated");
         } else {
           console.log(`[Storage] Auto-sync: Bound failed - ${boundResult.message}`);
+        }
+        
+        // Update TR-069 ACS profiles
+        const tr069Result = await this.refreshTr069Profiles();
+        if (tr069Result.success) {
+          console.log("[Storage] Auto-sync: TR-069 profiles updated");
+        } else {
+          console.log(`[Storage] Auto-sync: TR-069 failed - ${tr069Result.message}`);
         }
       } else {
         console.log("[Storage] Auto-sync: Skipped - OLT not connected");

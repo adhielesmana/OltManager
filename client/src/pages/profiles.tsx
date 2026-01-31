@@ -13,9 +13,16 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Layers, GitBranch, Settings2, RefreshCw } from "lucide-react";
+import { Layers, GitBranch, Settings2, RefreshCw, Radio } from "lucide-react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+
+interface Tr069Profile {
+  id: number;
+  name: string;
+  acsUrl?: string;
+  periodicInterval?: number;
+}
 
 export default function ProfilesPage() {
   const { toast } = useToast();
@@ -26,6 +33,10 @@ export default function ProfilesPage() {
 
   const { data: serviceProfiles = [], isLoading: serviceLoading } = useQuery<ServiceProfile[]>({
     queryKey: ["/api/profiles/service"],
+  });
+
+  const { data: tr069Profiles = [], isLoading: tr069Loading } = useQuery<Tr069Profile[]>({
+    queryKey: ["/api/tr069-profiles"],
   });
 
   const reloadMutation = useMutation({
@@ -44,6 +55,24 @@ export default function ProfilesPage() {
     },
     onError: (error: Error) => {
       toast({ title: "Reload Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const reloadTr069Mutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/tr069-profiles/refresh");
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({ title: "TR-069 Reload Complete", description: data.message });
+        queryClient.invalidateQueries({ queryKey: ["/api/tr069-profiles"] });
+      } else {
+        toast({ title: "TR-069 Reload Failed", description: data.message, variant: "destructive" });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "TR-069 Reload Error", description: error.message, variant: "destructive" });
     },
   });
 
@@ -80,6 +109,10 @@ export default function ProfilesPage() {
           <TabsTrigger value="service" className="flex items-center gap-2" data-testid="tab-service-profiles">
             <Settings2 className="h-4 w-4" />
             Service Profiles
+          </TabsTrigger>
+          <TabsTrigger value="tr069" className="flex items-center gap-2" data-testid="tab-tr069-profiles">
+            <Radio className="h-4 w-4" />
+            TR-069 ACS
           </TabsTrigger>
         </TabsList>
 
@@ -214,6 +247,83 @@ export default function ProfilesPage() {
                             <Badge variant="outline" className="text-xs">
                               {profile.portType}
                             </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="tr069">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-base">TR-069 ACS Profiles</CardTitle>
+                <CardDescription>
+                  Auto-configuration server profiles for remote management ({tr069Profiles.length} profiles)
+                </CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => reloadTr069Mutation.mutate()}
+                disabled={reloadTr069Mutation.isPending}
+                data-testid="button-refresh-tr069"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${reloadTr069Mutation.isPending ? "animate-spin" : ""}`} />
+                {reloadTr069Mutation.isPending ? "Reloading..." : "Reload"}
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {tr069Loading ? (
+                <div className="space-y-3">
+                  {[...Array(3)].map((_, i) => (
+                    <Skeleton key={i} className="h-14 w-full" />
+                  ))}
+                </div>
+              ) : tr069Profiles.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-4">
+                    <Radio className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <h3 className="font-medium text-lg">No TR-069 profiles</h3>
+                  <p className="text-muted-foreground text-sm mt-1">
+                    No TR-069 ACS profiles configured on the OLT. Click Reload to fetch from OLT.
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-16">ID</TableHead>
+                        <TableHead>Profile Name</TableHead>
+                        <TableHead>ACS URL</TableHead>
+                        <TableHead>Periodic Interval</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {tr069Profiles.map((profile) => (
+                        <TableRow key={profile.id} data-testid={`row-tr069-profile-${profile.id}`}>
+                          <TableCell>
+                            <Badge variant="outline" className="font-mono">
+                              {profile.id}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="font-medium">{profile.name}</TableCell>
+                          <TableCell className="text-muted-foreground font-mono text-xs max-w-[300px] truncate">
+                            {profile.acsUrl || "-"}
+                          </TableCell>
+                          <TableCell>
+                            {profile.periodicInterval ? (
+                              <Badge variant="secondary">{profile.periodicInterval}s</Badge>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
