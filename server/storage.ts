@@ -1446,7 +1446,8 @@ export class DatabaseStorage implements IStorage {
     // Validate and get Management VLAN (optional)
     let managementVlanId: number | undefined = undefined;
     if (request.managementVlanId) {
-      const mgmtVlan = dbVlans.find(v => v.id === request.managementVlanId);
+      // Frontend passes actual VLAN ID, not database row ID
+      const mgmtVlan = dbVlans.find(v => v.vlanId === request.managementVlanId);
       if (!mgmtVlan) {
         throw new Error("Management VLAN does not exist");
       }
