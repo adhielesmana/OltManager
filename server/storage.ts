@@ -717,10 +717,11 @@ export class DatabaseStorage implements IStorage {
       console.log("[Storage] Refreshing unbound ONUs from OLT...");
       const unboundList = await huaweiSSH.getUnboundOnus();
       
-      // Clear old unbound data and insert new
-      await db.delete(unboundOnus).where(eq(unboundOnus.oltCredentialId, credential.id));
-      
+      // Only update database if we got results - prevents clearing data when SSH fails
       if (unboundList.length > 0) {
+        // Clear old unbound data and insert new (only when we have new data)
+        await db.delete(unboundOnus).where(eq(unboundOnus.oltCredentialId, credential.id));
+        
         await db.insert(unboundOnus).values(
           unboundList.map(onu => ({
             serialNumber: onu.serialNumber,
@@ -733,10 +734,13 @@ export class DatabaseStorage implements IStorage {
             oltCredentialId: credential.id,
           }))
         );
+        console.log(`[Storage] Refreshed ${unboundList.length} unbound ONUs`);
+        return { success: true, message: `Found ${unboundList.length} unbound ONUs` };
+      } else {
+        // No ONUs found from SSH - keep existing data, don't clear
+        console.log("[Storage] No unbound ONUs returned from OLT - keeping existing data");
+        return { success: true, message: "No new unbound ONUs found (existing data preserved)" };
       }
-      
-      console.log(`[Storage] Refreshed ${unboundList.length} unbound ONUs`);
-      return { success: true, message: `Found ${unboundList.length} unbound ONUs` };
     } catch (error: any) {
       console.error("[Storage] Error refreshing unbound ONUs:", error);
       return { success: false, message: `Refresh failed: ${error.message}` };
@@ -766,6 +770,12 @@ export class DatabaseStorage implements IStorage {
     try {
       console.log("[Storage] Refreshing bound ONUs from OLT (merge approach)...");
       const sshList = await huaweiSSH.getBoundOnus();
+      
+      // Protection: If SSH returns empty, keep existing data (SSH may have failed)
+      if (sshList.length === 0) {
+        console.log("[Storage] SSH returned 0 bound ONUs - keeping existing data (SSH may have failed)");
+        return { success: true, message: "No bound ONUs from SSH (existing data preserved)" };
+      }
       
       // Get existing bound ONUs from database
       const dbOnus = await db.select().from(boundOnus).where(eq(boundOnus.oltCredentialId, credential.id));
