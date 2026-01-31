@@ -1716,6 +1716,11 @@ export class HuaweiSSH {
     try {
       console.log("[SSH] Fetching TR-069 profiles...");
       
+      // Exit to root config level first (in case we're inside interface/other context)
+      await this.executeCommand("quit");
+      await this.executeCommand("quit");
+      await this.executeCommand("quit");
+      
       // Try multiple command formats (different Huawei OLT versions use different commands)
       const commands = [
         "display tr069-server-config all",
