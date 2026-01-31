@@ -491,6 +491,27 @@ export async function registerRoutes(
     }
   });
 
+  // Get TR-069 profiles from database
+  app.get("/api/tr069-profiles", requireAuth, requirePermission("onu:view"), async (req, res) => {
+    try {
+      const profiles = await storage.getTr069Profiles();
+      res.json(profiles);
+    } catch (error) {
+      console.error("[Routes] Error getting TR-069 profiles:", error);
+      res.status(500).json({ error: "Failed to get TR-069 profiles" });
+    }
+  });
+
+  // Refresh TR-069 profiles from OLT
+  app.post("/api/tr069-profiles/refresh", requireAuth, requirePermission("onu:view"), async (req, res) => {
+    try {
+      const result = await storage.refreshTr069Profiles();
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ success: false, message: "Failed to refresh TR-069 profiles" });
+    }
+  });
+
   // Get available GPON ports from database cache only (no SSH)
   // GPON ports are fetched on OLT registration and refreshed daily at midnight
   app.get("/api/gpon-ports", requireAuth, requirePermission("onu:view"), async (req, res) => {

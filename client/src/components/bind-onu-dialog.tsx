@@ -58,6 +58,11 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
     queryKey: ["/api/vlans"],
   });
 
+  // Fetch TR-069 ACS profiles from database
+  const { data: tr069Profiles = [] } = useQuery<{ id: number; name: string; acsUrl?: string }[]>({
+    queryKey: ["/api/tr069-profiles"],
+  });
+
   const { data: gponPorts = [] } = useQuery<string[]>({
     queryKey: ["/api/gpon-ports"],
   });
@@ -469,14 +474,34 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
                 render={({ field }) => (
                   <FormItem className="col-span-2">
                     <FormLabel>TR-069 ACS Profile (Optional)</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="e.g., SURGE_ACS"
-                        {...field}
-                        data-testid="input-tr069-profile"
-                      />
-                    </FormControl>
-                    <FormDescription>ACS server profile for remote management</FormDescription>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger data-testid="select-tr069-profile">
+                          <SelectValue placeholder="Select ACS profile (optional)" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="">None</SelectItem>
+                        {tr069Profiles.map((profile) => (
+                          <SelectItem key={profile.id} value={profile.name}>
+                            {profile.name}
+                            {profile.acsUrl && (
+                              <span className="text-muted-foreground text-xs ml-2">
+                                ({profile.acsUrl})
+                              </span>
+                            )}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      {tr069Profiles.length === 0 
+                        ? "No ACS profiles loaded - sync profiles from OLT first" 
+                        : "ACS server profile for remote management"}
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

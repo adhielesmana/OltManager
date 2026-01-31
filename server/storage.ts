@@ -10,6 +10,7 @@ import {
   lineProfiles,
   serviceProfiles,
   vlans,
+  tr069Profiles,
   oltDataRefresh,
   type User,
   type InsertUser,
@@ -22,6 +23,7 @@ import {
   type LineProfile,
   type ServiceProfile,
   type Vlan,
+  type DbTr069Profile,
   type OltInfo,
   type BindOnuRequest,
   type OnuVerification,
@@ -1003,6 +1005,63 @@ export class DatabaseStorage implements IStorage {
       return { success: true, message: `Found ${fetchedVlans.length} VLANs` };
     } catch (error: any) {
       console.error("[Storage] Error refreshing VLANs:", error);
+      return { success: false, message: `Refresh failed: ${error.message}` };
+    }
+  }
+
+  // Get TR-069 profiles from database
+  async getTr069Profiles(): Promise<DbTr069Profile[]> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential) return [];
+    
+    return await db.select().from(tr069Profiles).where(eq(tr069Profiles.oltCredentialId, credential.id));
+  }
+
+  // Refresh TR-069 profiles from OLT
+  async refreshTr069Profiles(): Promise<{ success: boolean; message: string }> {
+    const credential = await this.getActiveOltCredential();
+    if (!credential) {
+      return { success: false, message: "No active OLT credential" };
+    }
+
+    if (!huaweiSSH.isConnected()) {
+      const password = decryptOltPassword(credential.passwordEncrypted);
+      const connectResult = await huaweiSSH.connect({
+        host: credential.host,
+        port: credential.port,
+        username: credential.username,
+        password: password,
+      });
+      if (!connectResult.success) {
+        return { success: false, message: `Cannot connect to OLT: ${connectResult.message}` };
+      }
+    }
+
+    try {
+      console.log("[Storage] Refreshing TR-069 profiles from OLT...");
+      const fetchedProfiles = await huaweiSSH.getTr069Profiles();
+      
+      // Only update if we got results
+      if (fetchedProfiles.length > 0) {
+        // Clear old profiles and insert new
+        await db.delete(tr069Profiles).where(eq(tr069Profiles.oltCredentialId, credential.id));
+        
+        await db.insert(tr069Profiles).values(
+          fetchedProfiles.map(p => ({
+            name: p.name,
+            acsUrl: p.acsUrl || null,
+            username: p.username || null,
+            oltCredentialId: credential.id,
+          }))
+        );
+        console.log(`[Storage] Refreshed ${fetchedProfiles.length} TR-069 profiles`);
+        return { success: true, message: `Found ${fetchedProfiles.length} TR-069 profiles` };
+      } else {
+        console.log("[Storage] No TR-069 profiles returned from OLT - keeping existing data");
+        return { success: true, message: "No TR-069 profiles found (existing data preserved)" };
+      }
+    } catch (error: any) {
+      console.error("[Storage] Error refreshing TR-069 profiles:", error);
       return { success: false, message: `Refresh failed: ${error.message}` };
     }
   }

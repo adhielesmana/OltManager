@@ -245,6 +245,23 @@ export const insertVlanSchema = createInsertSchema(vlans).omit({
 export type InsertVlan = z.infer<typeof insertVlanSchema>;
 export type DbVlan = typeof vlans.$inferSelect;
 
+// TR-069 ACS Profiles table - pre-configured on OLT
+export const tr069Profiles = pgTable("tr069_profiles", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  acsUrl: text("acs_url"),
+  username: text("username"),
+  oltCredentialId: integer("olt_credential_id").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertTr069ProfileSchema = createInsertSchema(tr069Profiles).omit({
+  id: true,
+  updatedAt: true,
+});
+export type InsertTr069Profile = z.infer<typeof insertTr069ProfileSchema>;
+export type DbTr069Profile = typeof tr069Profiles.$inferSelect;
+
 // OLT data refresh tracking
 export const oltDataRefresh = pgTable("olt_data_refresh", {
   id: serial("id").primaryKey(),

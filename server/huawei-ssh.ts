@@ -1711,6 +1711,66 @@ export class HuaweiSSH {
     return vlans;
   }
 
+  // Get TR-069 ACS profiles from OLT
+  async getTr069Profiles(): Promise<{ name: string; acsUrl?: string; username?: string }[]> {
+    try {
+      console.log("[SSH] Fetching TR-069 profiles...");
+      
+      // Execute display tr069-server-config all command
+      const output = await this.executeCommand("display tr069-server-config all");
+      console.log(`[SSH] TR-069 profiles raw output:\n${output.substring(0, 500)}`);
+      
+      return this.parseTr069Profiles(output);
+    } catch (err) {
+      console.error("[SSH] Error getting TR-069 profiles:", err);
+      return [];
+    }
+  }
+
+  private parseTr069Profiles(output: string): { name: string; acsUrl?: string; username?: string }[] {
+    const profiles: { name: string; acsUrl?: string; username?: string }[] = [];
+    const lines = output.split("\n");
+    
+    let currentProfile: { name: string; acsUrl?: string; username?: string } | null = null;
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      
+      // Match profile name line: "Profile-name : SURGE_ACS" or "Profile name : SURGE_ACS"
+      const nameMatch = trimmed.match(/^Profile[- ]?name\s*:\s*(.+)/i);
+      if (nameMatch) {
+        // Save previous profile if exists
+        if (currentProfile && currentProfile.name) {
+          profiles.push(currentProfile);
+        }
+        currentProfile = { name: nameMatch[1].trim() };
+        continue;
+      }
+      
+      // Match ACS URL: "ACS URL : http://acs.example.com:7547"
+      const urlMatch = trimmed.match(/^ACS\s+URL\s*:\s*(.+)/i);
+      if (urlMatch && currentProfile) {
+        currentProfile.acsUrl = urlMatch[1].trim();
+        continue;
+      }
+      
+      // Match Username: "Username : admin"
+      const userMatch = trimmed.match(/^Username\s*:\s*(.+)/i);
+      if (userMatch && currentProfile) {
+        currentProfile.username = userMatch[1].trim();
+        continue;
+      }
+    }
+    
+    // Don't forget last profile
+    if (currentProfile && currentProfile.name) {
+      profiles.push(currentProfile);
+    }
+    
+    console.log(`[SSH] Parsed ${profiles.length} TR-069 profiles:`, profiles.map(p => p.name));
+    return profiles;
+  }
+
   async getOnuOpticalInfo(gponPort: string, onuId: number): Promise<{ rxPower?: number; txPower?: number; distance?: number } | null> {
     if (!this.isConnected()) {
       return null;
