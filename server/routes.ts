@@ -512,6 +512,45 @@ export async function registerRoutes(
     }
   });
 
+  // Create TR-069 ACS profile on OLT
+  app.post("/api/tr069-profiles", requireAuth, requirePermission("olt:configure"), async (req, res) => {
+    try {
+      const { name, acsUrl, username, password, periodicInterval } = req.body;
+      
+      if (!name || !acsUrl) {
+        return res.status(400).json({ success: false, message: "Profile name and ACS URL are required" });
+      }
+      
+      // Validate name format (alphanumeric and underscores only)
+      if (!/^[a-zA-Z0-9_]+$/.test(name)) {
+        return res.status(400).json({ success: false, message: "Profile name must be alphanumeric (underscores allowed)" });
+      }
+      
+      // Validate ACS URL format
+      if (!acsUrl.startsWith("http://") && !acsUrl.startsWith("https://")) {
+        return res.status(400).json({ success: false, message: "ACS URL must start with http:// or https://" });
+      }
+      
+      const result = await huaweiSSH.createTr069Profile({
+        name,
+        acsUrl,
+        username,
+        password,
+        periodicInterval: periodicInterval ? parseInt(periodicInterval) : undefined,
+      });
+      
+      if (result.success) {
+        // Refresh TR-069 profiles from OLT to update database
+        await storage.refreshTr069Profiles();
+      }
+      
+      res.json(result);
+    } catch (error) {
+      console.error("[API] Error creating TR-069 profile:", error);
+      res.status(500).json({ success: false, message: "Failed to create TR-069 profile" });
+    }
+  });
+
   // Get available GPON ports from database cache only (no SSH)
   // GPON ports are fetched on OLT registration and refreshed daily at midnight
   app.get("/api/gpon-ports", requireAuth, requirePermission("onu:view"), async (req, res) => {

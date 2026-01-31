@@ -1771,6 +1771,62 @@ export class HuaweiSSH {
     return profiles;
   }
 
+  // Create TR-069 ACS profile on OLT
+  async createTr069Profile(params: {
+    name: string;
+    acsUrl: string;
+    username?: string;
+    password?: string;
+    periodicInterval?: number;
+  }): Promise<{ success: boolean; message: string }> {
+    if (!this.isConnected()) {
+      return { success: false, message: "No active OLT connection" };
+    }
+
+    try {
+      console.log(`[SSH] Creating TR-069 profile: ${params.name}`);
+      
+      // Enter config mode first
+      await this.executeCommandWithDelay("config");
+      
+      // Create or enter the TR-069 profile
+      await this.executeCommandWithDelay(`tr069-server-config profile-name ${params.name}`);
+      
+      // Set ACS URL
+      await this.executeCommandWithDelay(`acs-url ${params.acsUrl}`);
+      
+      // Set username if provided
+      if (params.username) {
+        await this.executeCommandWithDelay(`acs-username ${params.username}`);
+      }
+      
+      // Set password if provided
+      if (params.password) {
+        await this.executeCommandWithDelay(`acs-password ${params.password}`);
+      }
+      
+      // Set periodic interval if provided (default is usually 86400 = 1 day)
+      if (params.periodicInterval) {
+        await this.executeCommandWithDelay(`periodic-inform-interval ${params.periodicInterval}`);
+      }
+      
+      // Exit TR-069 config and config mode
+      await this.executeCommandWithDelay("quit");
+      await this.executeCommandWithDelay("quit");
+      
+      console.log(`[SSH] TR-069 profile ${params.name} created successfully`);
+      return { success: true, message: `TR-069 profile '${params.name}' created successfully` };
+    } catch (err) {
+      console.error("[SSH] Error creating TR-069 profile:", err);
+      // Try to exit any config modes
+      try {
+        await this.executeCommand("quit");
+        await this.executeCommand("quit");
+      } catch {}
+      return { success: false, message: `Failed to create TR-069 profile: ${err instanceof Error ? err.message : "Unknown error"}` };
+    }
+  }
+
   async getOnuOpticalInfo(gponPort: string, onuId: number): Promise<{ rxPower?: number; txPower?: number; distance?: number } | null> {
     if (!this.isConnected()) {
       return null;

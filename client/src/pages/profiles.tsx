@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import type { LineProfile, ServiceProfile } from "@shared/schema";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -11,9 +14,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Layers, GitBranch, Settings2, RefreshCw, Radio } from "lucide-react";
+import { Layers, GitBranch, Settings2, RefreshCw, Radio, Plus } from "lucide-react";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -26,6 +37,14 @@ interface Tr069Profile {
 
 export default function ProfilesPage() {
   const { toast } = useToast();
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [newProfile, setNewProfile] = useState({
+    name: "",
+    acsUrl: "",
+    username: "",
+    password: "",
+    periodicInterval: "",
+  });
 
   const { data: lineProfiles = [], isLoading: lineLoading } = useQuery<LineProfile[]>({
     queryKey: ["/api/profiles/line"],
@@ -75,6 +94,34 @@ export default function ProfilesPage() {
       toast({ title: "TR-069 Reload Error", description: error.message, variant: "destructive" });
     },
   });
+
+  const createTr069Mutation = useMutation({
+    mutationFn: async (data: typeof newProfile) => {
+      const res = await apiRequest("POST", "/api/tr069-profiles", data);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({ title: "Profile Created", description: data.message });
+        queryClient.invalidateQueries({ queryKey: ["/api/tr069-profiles"] });
+        setCreateDialogOpen(false);
+        setNewProfile({ name: "", acsUrl: "", username: "", password: "", periodicInterval: "" });
+      } else {
+        toast({ title: "Create Failed", description: data.message, variant: "destructive" });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Create Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleCreateProfile = () => {
+    if (!newProfile.name || !newProfile.acsUrl) {
+      toast({ title: "Missing Fields", description: "Profile name and ACS URL are required", variant: "destructive" });
+      return;
+    }
+    createTr069Mutation.mutate(newProfile);
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -267,16 +314,27 @@ export default function ProfilesPage() {
                   Auto-configuration server profiles for remote management ({tr069Profiles.length} profiles)
                 </CardDescription>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => reloadTr069Mutation.mutate()}
-                disabled={reloadTr069Mutation.isPending}
-                data-testid="button-refresh-tr069"
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${reloadTr069Mutation.isPending ? "animate-spin" : ""}`} />
-                {reloadTr069Mutation.isPending ? "Reloading..." : "Reload"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => setCreateDialogOpen(true)}
+                  data-testid="button-create-tr069"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => reloadTr069Mutation.mutate()}
+                  disabled={reloadTr069Mutation.isPending}
+                  data-testid="button-refresh-tr069"
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${reloadTr069Mutation.isPending ? "animate-spin" : ""}`} />
+                  {reloadTr069Mutation.isPending ? "Reloading..." : "Reload"}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               {tr069Loading ? (
@@ -291,9 +349,16 @@ export default function ProfilesPage() {
                     <Radio className="h-6 w-6 text-muted-foreground" />
                   </div>
                   <h3 className="font-medium text-lg">No TR-069 profiles</h3>
-                  <p className="text-muted-foreground text-sm mt-1">
-                    No TR-069 ACS profiles configured on the OLT. Click Reload to fetch from OLT.
+                  <p className="text-muted-foreground text-sm mt-1 mb-4">
+                    No TR-069 ACS profiles found. Create one or reload from OLT.
                   </p>
+                  <Button
+                    onClick={() => setCreateDialogOpen(true)}
+                    data-testid="button-create-tr069-empty"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create ACS Profile
+                  </Button>
                 </div>
               ) : (
                 <div className="rounded-md border">
@@ -335,6 +400,95 @@ export default function ProfilesPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create TR-069 ACS Profile</DialogTitle>
+            <DialogDescription>
+              Create a new TR-069 auto-configuration server profile on the OLT
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="profile-name">Profile Name *</Label>
+              <Input
+                id="profile-name"
+                placeholder="e.g., MY_ACS_SERVER"
+                value={newProfile.name}
+                onChange={(e) => setNewProfile({ ...newProfile, name: e.target.value })}
+                data-testid="input-tr069-name"
+              />
+              <p className="text-xs text-muted-foreground">
+                Alphanumeric characters and underscores only
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="acs-url">ACS URL *</Label>
+              <Input
+                id="acs-url"
+                placeholder="http://acs.example.com:7547/acs"
+                value={newProfile.acsUrl}
+                onChange={(e) => setNewProfile({ ...newProfile, acsUrl: e.target.value })}
+                data-testid="input-tr069-url"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="acs-username">Username (Optional)</Label>
+                <Input
+                  id="acs-username"
+                  placeholder="admin"
+                  value={newProfile.username}
+                  onChange={(e) => setNewProfile({ ...newProfile, username: e.target.value })}
+                  data-testid="input-tr069-username"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="acs-password">Password (Optional)</Label>
+                <Input
+                  id="acs-password"
+                  type="password"
+                  placeholder="••••••"
+                  value={newProfile.password}
+                  onChange={(e) => setNewProfile({ ...newProfile, password: e.target.value })}
+                  data-testid="input-tr069-password"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="periodic-interval">Periodic Interval (Optional)</Label>
+              <Input
+                id="periodic-interval"
+                type="number"
+                placeholder="86400 (seconds)"
+                value={newProfile.periodicInterval}
+                onChange={(e) => setNewProfile({ ...newProfile, periodicInterval: e.target.value })}
+                data-testid="input-tr069-interval"
+              />
+              <p className="text-xs text-muted-foreground">
+                Interval in seconds for periodic inform (default: 86400 = 1 day)
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCreateDialogOpen(false)}
+              data-testid="button-cancel-tr069"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateProfile}
+              disabled={createTr069Mutation.isPending}
+              data-testid="button-submit-tr069"
+            >
+              {createTr069Mutation.isPending ? "Creating..." : "Create Profile"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
