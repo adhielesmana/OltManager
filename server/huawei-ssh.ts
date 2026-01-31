@@ -1723,16 +1723,13 @@ export class HuaweiSSH {
       await this.executeCommandWithDelay("quit", 300);
       await this.executeCommandWithDelay("quit", 300);
       
-      // Enter config mode, then ONT directory
-      console.log("[SSH] Entering config > ont...");
+      // Enter config mode (TR-069 profiles are displayed from config level)
+      console.log("[SSH] Entering config mode...");
       await this.executeCommandWithDelay("config", 500);
-      await this.executeCommandWithDelay("ont", 500);
       
-      // Try multiple command formats under ONT context
+      // The correct command is: display ont tr069-server-profile all
       const commands = [
-        "display tr069-server-config all",
-        "display tr069-server-config",
-        "display current-configuration | include tr069"
+        "display ont tr069-server-profile all"
       ];
       
       for (const cmd of commands) {
@@ -1815,40 +1812,36 @@ export class HuaweiSSH {
     const profiles: { name: string; acsUrl?: string; username?: string }[] = [];
     const lines = output.split("\n");
     
-    let currentProfile: { name: string; acsUrl?: string; username?: string } | null = null;
+    // Parse table format from "display ont tr069-server-profile all":
+    // Profile ID     Profile Name                     Binding Times 
+    // --------------------------------------------------------------
+    // 1              YINET_ACS                        0             
     
     for (const line of lines) {
       const trimmed = line.trim();
       
-      // Match profile name line: "Profile-name : SURGE_ACS" or "Profile name : SURGE_ACS"
-      const nameMatch = trimmed.match(/^Profile[- ]?name\s*:\s*(.+)/i);
-      if (nameMatch) {
-        // Save previous profile if exists
-        if (currentProfile && currentProfile.name) {
-          profiles.push(currentProfile);
+      // Skip header lines, separator lines, and empty lines
+      if (!trimmed || 
+          trimmed.startsWith("-") || 
+          trimmed.toLowerCase().includes("profile id") ||
+          trimmed.toLowerCase().includes("total:") ||
+          trimmed.includes("<cr>") ||
+          trimmed.includes("Command:")) {
+        continue;
+      }
+      
+      // Parse table row: "1              YINET_ACS                        0"
+      // Format: ProfileID  ProfileName  BindingTimes
+      const parts = trimmed.split(/\s+/);
+      if (parts.length >= 2) {
+        const profileId = parts[0];
+        const profileName = parts[1];
+        
+        // Validate: first part should be a number (profile ID)
+        if (/^\d+$/.test(profileId) && profileName && profileName.length > 0) {
+          profiles.push({ name: profileName });
         }
-        currentProfile = { name: nameMatch[1].trim() };
-        continue;
       }
-      
-      // Match ACS URL: "ACS URL : http://acs.example.com:7547"
-      const urlMatch = trimmed.match(/^ACS\s+URL\s*:\s*(.+)/i);
-      if (urlMatch && currentProfile) {
-        currentProfile.acsUrl = urlMatch[1].trim();
-        continue;
-      }
-      
-      // Match Username: "Username : admin"
-      const userMatch = trimmed.match(/^Username\s*:\s*(.+)/i);
-      if (userMatch && currentProfile) {
-        currentProfile.username = userMatch[1].trim();
-        continue;
-      }
-    }
-    
-    // Don't forget last profile
-    if (currentProfile && currentProfile.name) {
-      profiles.push(currentProfile);
     }
     
     console.log(`[SSH] Parsed ${profiles.length} TR-069 profiles:`, profiles.map(p => p.name));
