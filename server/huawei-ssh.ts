@@ -1716,10 +1716,15 @@ export class HuaweiSSH {
     try {
       console.log("[SSH] Fetching TR-069 profiles...");
       
-      // Exit to root level, enter config mode, then ONT directory
-      await this.executeCommand("quit");
-      await this.executeCommand("quit"); 
-      await this.executeCommand("quit");
+      // Exit to root level with delays to ensure proper context switching
+      console.log("[SSH] Exiting to root level...");
+      await this.executeCommandWithDelay("quit", 300);
+      await this.executeCommandWithDelay("quit", 300); 
+      await this.executeCommandWithDelay("quit", 300);
+      await this.executeCommandWithDelay("quit", 300);
+      
+      // Enter config mode, then ONT directory
+      console.log("[SSH] Entering config > ont...");
       await this.executeCommandWithDelay("config", 500);
       await this.executeCommandWithDelay("ont", 500);
       
