@@ -59,9 +59,31 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
   });
 
   // Fetch TR-069 ACS profiles from database
-  const { data: tr069Profiles = [] } = useQuery<{ id: number; name: string; acsUrl?: string }[]>({
+  const { data: tr069Profiles = [], isLoading: tr069Loading } = useQuery<{ id: number; name: string; acsUrl?: string }[]>({
     queryKey: ["/api/tr069-profiles"],
   });
+
+  // Auto-refresh TR-069 profiles if none exist when dialog opens
+  const [tr069AutoRefreshed, setTr069AutoRefreshed] = useState(false);
+  const refreshTr069Mutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/tr069-profiles/refresh");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tr069-profiles"] });
+    },
+  });
+
+  useEffect(() => {
+    if (open && !tr069Loading && tr069Profiles.length === 0 && !tr069AutoRefreshed && !refreshTr069Mutation.isPending) {
+      setTr069AutoRefreshed(true);
+      refreshTr069Mutation.mutate();
+    }
+    if (!open) {
+      setTr069AutoRefreshed(false);
+    }
+  }, [open, tr069Loading, tr069Profiles.length, tr069AutoRefreshed, refreshTr069Mutation.isPending]);
 
   const { data: gponPorts = [] } = useQuery<string[]>({
     queryKey: ["/api/gpon-ports"],
@@ -475,16 +497,17 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
                   <FormItem className="col-span-2">
                     <FormLabel>TR-069 ACS Profile (Optional)</FormLabel>
                     <Select
-                      onValueChange={field.onChange}
-                      value={field.value}
+                      onValueChange={(val) => field.onChange(val === "__none__" ? "" : val)}
+                      value={field.value || "__none__"}
+                      disabled={refreshTr069Mutation.isPending}
                     >
                       <FormControl>
                         <SelectTrigger data-testid="select-tr069-profile">
-                          <SelectValue placeholder="Select ACS profile (optional)" />
+                          <SelectValue placeholder={refreshTr069Mutation.isPending ? "Loading profiles..." : "Select ACS profile (optional)"} />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">None</SelectItem>
+                        <SelectItem value="__none__">None</SelectItem>
                         {tr069Profiles.map((profile) => (
                           <SelectItem key={profile.id} value={profile.name}>
                             {profile.name}
@@ -498,9 +521,11 @@ export function BindOnuDialog({ open, onOpenChange, selectedOnu }: BindOnuDialog
                       </SelectContent>
                     </Select>
                     <FormDescription>
-                      {tr069Profiles.length === 0 
-                        ? "No ACS profiles loaded - sync profiles from OLT first" 
-                        : "ACS server profile for remote management"}
+                      {refreshTr069Mutation.isPending
+                        ? "Loading ACS profiles from OLT..."
+                        : tr069Profiles.length === 0 
+                          ? "No ACS profiles on OLT" 
+                          : "ACS server profile for remote management"}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
